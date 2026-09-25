@@ -100,8 +100,8 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
-        permissions: Array<out String>?,
-        grantResults: IntArray?
+        permissions: Array<out String>,
+        grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_LOC) bridge.startFeeds(null)   // 授权了就立刻把数据链跑起来
