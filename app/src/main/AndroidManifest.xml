@@ -3,11 +3,23 @@
 
     <!-- 开机自启：车机通电即拉起桌面 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- 加载高德 JS API（设置里填了 key 才用，不填就是离线示意地图） -->
+    <!-- 联网：留给以后接天气/在线歌词用（地图走本机 App，不靠它） -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- targetSdk 30+ 下按包名查其他 App（打开导航/音乐）必须声明 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <!--
+      包可见性（Android 11+）。
+      只给 QUERY_ALL_PACKAGES 在某些 ROM 上仍会被拦，这里再补一条「所有带启动入口的 App」
+      的静默查询声明。两条一起上，CarBridge.hasApp() 才在各种车机上都靠得住。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"

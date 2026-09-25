@@ -15,9 +15,9 @@
   单位策略：字号与关键尺寸全部走 vh，任何横屏分辨率都能等比铺满
   ----------------------------------------------------------------------------
   接入真实数据的位置（搜这几个关键字就能找到）：
-    1) [BRIDGE]  —— 与安卓侧 JavascriptInterface 通信（媒体控制、速度、GPS）
+    1) [BRIDGE]  —— 与安卓侧 JavascriptInterface 通信（媒体控制、速度、GPS、拉起 App）
     2) [WEATHER] —— 天气接口（和风天气 / 心知天气）
-    3) [AMAP]    —— 高德 JS API 接入点（默认用 Canvas 画示意地图）
+    3) [MAPAPP]  —— 地图 = 拉起本机装的那个地图 App（魔改版也行），不在网页里渲染真图
   ============================================================================
 -->
 <style>
@@ -444,16 +444,7 @@ body {
   min-width: 0;
 }
 #mapCanvas { display: block; width: 100%; height: 100%; }
-#amapBox { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 #navCard, #mapClock, #mapSpeed, #scalebar { z-index: 5; }
-/* 高德地图上的自车标记 */
-.carMark {
-  width: 2.6vh; height: 2.6vh;
-  border-radius: 50%;
-  background: #2f8fef;
-  border: 0.42vh solid #fff;
-  box-shadow: 0 0.3vh 0.8vh rgba(0,0,0,.35);
-}
 
 /* 转向指引卡 */
 #navCard {
@@ -551,6 +542,30 @@ body {
   margin-top: 0.3vh;
 }
 
+/* ======================= 地图区「打开本机地图」浮标 =======================
+   整个地图区都能点（点哪儿都是打开本机地图），这个浮标只是让人知道「这里能点」。
+   ======================================================================= */
+#mapOpenBtn {
+  position: absolute;
+  left: 50%; bottom: 1.4vh;
+  -webkit-transform: translateX(-50%);
+  transform: translateX(-50%);
+  z-index: 6;
+  background: rgba(255,255,255,.94);
+  color: #35363a;
+  border-radius: 0.7vh;
+  padding: 0.8vh 1.4vh;
+  font-size: 1.8vh;
+  white-space: nowrap;
+  box-shadow: 0 0.4vh 1.2vh rgba(0,0,0,.2);
+  cursor: pointer;
+}
+#mapOpenBtn:active { opacity: .8; }
+#mapOpenBtn.on { background: #e1251b; color: #fff; }   /* 已接本机地图时高亮 */
+#mapwrap.tapable { cursor: pointer; }
+body.night #mapOpenBtn { background: rgba(30,33,40,.94); color: #e6e8ec; }
+body.night #mapOpenBtn.on { background: #e1251b; color: #fff; }
+
 /* ======================= 设置面板 ======================= */
 #panelMask {
   position: absolute;
@@ -562,10 +577,19 @@ body {
 #panelMask.show { display: block; }
 #panel {
   position: absolute;
-  right: 1.2vh; top: 7.6vh;
+  right: 1.2vh; top: 7vh;
   width: 34vh;
   max-height: 88vh;
-  overflow-y: auto;
+  /* 用 flex 列布局把面板切成「上面可滚动的内容区 + 下面不滚的按钮条」，
+     否则内容一多，底部的「保存并应用」就被挤出屏幕点不到了。
+     注：不用 position:sticky —— 老 WebView（Chrome<56）不支持。 */
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  overflow: hidden;
   background: #fff;
   border-radius: 1.2vh;
   padding: 1.6vh;
@@ -573,9 +597,17 @@ body {
   font-size: 2vh;
   color: #35363a;
 }
+.pbody {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 #panel h4 { font-size: 2.1vh; margin-bottom: 1.2vh; font-weight: 700; }
 #panel h4.sub {
-  margin-top: 1.4vh; padding-top: 1.4vh;
+  margin-top: 1.1vh; padding-top: 1.1vh;
   border-top: 0.24vh solid #eceef2;
   color: #e1251b;
 }
@@ -589,7 +621,7 @@ body {
   -webkit-box-pack: justify;
   -webkit-justify-content: space-between;
   justify-content: space-between;
-  padding: 1vh 0;
+  padding: 0.7vh 0;
   border-top: 0.14vh solid #f0f1f4;
 }
 .prow:first-of-type { border-top: 0; }
@@ -600,7 +632,7 @@ body {
 .prow.col span { display: block; margin-bottom: 0.7vh; }
 .prow.col input {
   width: 100%;
-  height: 4.6vh;
+  height: 4.1vh;
   font-size: 1.9vh;
   font-family: inherit;
   padding: 0 1vh;
@@ -613,6 +645,20 @@ body {
   user-select: text;
 }
 .prow.col input:focus { border-color: #e1251b; background: #fff; }
+/* 包名快捷填入（车机上打字很烦，给几个常用的点一下就行） */
+.pkgQuick { margin-top: 0.8vh; }
+.pkgQuick b {
+  display: inline-block;
+  font-size: 1.6vh;
+  font-weight: 500;
+  color: #6b6d72;
+  background: #f0f1f4;
+  border-radius: 0.6vh;
+  padding: 0.5vh 1vh;
+  margin: 0 0.55vh 0.5vh 0;
+  cursor: pointer;
+}
+.pkgQuick b:active { opacity: .8; }
 .seg {
   display: -webkit-box;
   display: -webkit-flex;
@@ -637,10 +683,15 @@ body {
   box-shadow: 0 0.15vh 0.4vh rgba(0,0,0,.1);
 }
 .pbtns {
+  -webkit-box-flex: 0;
+  -webkit-flex: none;
+  flex: none;
   display: -webkit-box;
   display: -webkit-flex;
   display: flex;
-  margin-top: 1.4vh;
+  margin-top: 0.9vh;
+  padding-top: 0.9vh;
+  border-top: 0.14vh solid #f0f1f4;
 }
 .pbtns button {
   -webkit-box-flex: 1;
@@ -680,7 +731,7 @@ body {
 }
 .sw.on { background: #e1251b; }
 .sw.on i { left: 3.52vh; }
-#panel .pinfo { font-size: 1.75vh; color: #9a9da4; line-height: 1.5; margin-top: 1.2vh; }
+#panel .pinfo { font-size: 1.7vh; color: #9a9da4; line-height: 1.45; margin-top: 1vh; }
 
 /* ======================= 提示气泡 ======================= */
 #toast {
@@ -733,6 +784,7 @@ body.night .prow.col input { background: #23262d; border-color: #3a3e46; color: 
 body.night .seg { background: #23262d; }
 body.night .seg b { color: #9aa0a8; }
 body.night .seg b.on { background: #333842; color: #ff6b5e; }
+body.night .pbtns { border-top-color: #2a2e36; }
 body.night .pbtns button { background: #2a2e36; color: #c9ccd3; }
 body.night .pbtns button:last-child { background: #e1251b; color: #fff; }
 body.night #scalebar { color: #2b2f36; }
@@ -876,7 +928,6 @@ body.night #scalebar { color: #2b2f36; }
     <!-- 右侧地图 -->
     <div id="mapwrap">
       <canvas id="mapCanvas"></canvas>
-      <div id="amapBox"></div>
 
       <div id="navCard">
         <div class="turn">
@@ -895,6 +946,8 @@ body.night #scalebar { color: #2b2f36; }
       <div id="mapClock">14:58</div>
       <div id="mapSpeed"><div class="n" id="mapSpdN">29</div><div class="l">km/h</div></div>
       <div id="scalebar"><div>200 m</div><div class="bar"></div></div>
+      <!-- 整个地图区都可点：点哪儿都是打开本机地图 App（不用先跑设置） -->
+      <div id="mapOpenBtn">点这里打开本机地图</div>
     </div>
 
   </div>
@@ -903,6 +956,7 @@ body.night #scalebar { color: #2b2f36; }
 <!-- 设置面板 -->
 <div id="panelMask">
   <div id="panel">
+   <div class="pbody">
     <h4>桌面设置</h4>
     <div class="prow"><span>夜间模式</span><div class="sw" id="swNight"><i></i></div></div>
     <div class="prow"><span>开机自启</span><div class="sw on" id="swBoot"><i></i></div></div>
@@ -913,12 +967,15 @@ body.night #scalebar { color: #2b2f36; }
     <div class="prow">
       <span>地图源</span>
       <div class="seg" id="segSrc">
-        <b class="on" data-v="demo">示意地图</b><b data-v="amap">高德 JS</b>
+        <b class="on" data-v="demo">示意图</b><b data-v="app">本机地图</b>
       </div>
     </div>
     <div class="prow col">
-      <span>高德 Key（Web端 JS API）</span>
-      <input id="amapKey" type="text" placeholder="粘贴你自己的 key 后点保存" autocomplete="off" autocorrect="off" spellcheck="false">
+      <span>本机地图 App 包名（你装的魔改版）</span>
+      <input id="appPkg" type="text" placeholder="com.autonavi.amapautp" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div class="pkgQuick" id="pkgQuick">
+        <b data-pkg="com.autonavi.amapautp">高德共存版</b><b data-pkg="com.autonavi.amapauto">高德车机版</b><b data-pkg="com.baidu.BaiduMap">百度地图</b><b data-pkg="com.tencent.map">腾讯地图</b>
+      </div>
     </div>
     <div class="prow"><span>转向指引卡</span><div class="sw on" id="swNav"><i></i></div></div>
     <div class="prow"><span>时间胶囊</span><div class="sw on" id="swClk"><i></i></div></div>
@@ -927,9 +984,9 @@ body.night #scalebar { color: #2b2f36; }
 
     <div class="pinfo" id="pinfo">
       分屏比例：<span id="pSplit">左 34% / 图 66%</span><br>
-      高德 key 需选「Web端(JS API)」并取消域名白名单，否则会报
-      INVALID_USER_DOMAIN；key 为空或加载失败会自动回退示意地图。
+      点地图区 = 打开你装的本机地图（魔改版也行），包名填对就行，不需要 key。
     </div>
+   </div>
     <div class="pbtns">
       <button id="btnSys">系统设置</button>
       <button id="btnClose">关闭</button>
@@ -1025,7 +1082,7 @@ body.night #scalebar { color: #2b2f36; }
     }
   };
   $('navBtn').onclick = function () {
-    bridge('openApp', 'com.autonavi.amapautp', '导航：待接入高德车机版');
+    openMapApp();                       // 走设置里配的那个包名
   };
 
   /* =========================== 3. 天气 [WEATHER] ===========================
@@ -1082,7 +1139,6 @@ body.night #scalebar { color: #2b2f36; }
     $('left').style.width = r + '%';
     $('pSplit').innerHTML = '左 ' + r + '% / 图 ' + (100 - r) + '%';
     setTimeout(drawMap, 320);          // 动画结束后按新宽度重画地图
-    if (amapObj) { setTimeout(function () { amapObj.resize(); }, 340); }
   }
   $('splitBtn').onclick = function () {
     splitIdx = (splitIdx + 1) % splitRatios.length;
@@ -1107,7 +1163,7 @@ body.night #scalebar { color: #2b2f36; }
   var CFG_KEY = 'cardesk_cfg';
   var cfg = {
     night: false, boot: true, rail: true, voice: true,
-    split: 34, mapSrc: 'demo', amapKey: '',
+    split: 34, mapSrc: 'demo', mapPkg: 'com.autonavi.amapautp',
     lNav: true, lClk: true, lScale: true, lTraffic: true
   };
   function prefGet(k) {
@@ -1135,10 +1191,38 @@ body.night #scalebar { color: #2b2f36; }
 
   /* =========================== 7. 设置面板 =========================== */
   function openPanel() {
-    $('amapKey').value = cfg.amapKey;
+    $('appPkg').value = cfg.mapPkg;
+    autoDetectMapPkg();          // 顺手探测一下车机上装了哪些地图，省得手打包名
     $('panelMask').className = 'show';
   }
   function closePanel() { $('panelMask').className = ''; }
+
+  /* 探测候选包名里哪个真装了（需要安卓桥的 hasApp；浏览器里直接跳过） */
+  var PKG_CANDIDATES = [
+    'com.autonavi.amapautp',   // 高德车机共存版（你那个魔改包一般就是它）
+    'com.autonavi.amapauto',   // 高德车机版
+    'com.autonavi.minimap',    // 高德手机版
+    'com.baidu.BaiduMap',      // 百度地图
+    'com.tencent.map'          // 腾讯地图
+  ];
+  function canProbePkg() {
+    return hasBridge() && typeof window.CarBridge.hasApp === 'function';
+  }
+  function autoDetectMapPkg() {
+    if (!canProbePkg()) return;
+    var hit = '';
+    for (var i = 0; i < PKG_CANDIDATES.length; i++) {
+      var ok = false;
+      try { ok = !!window.CarBridge.hasApp(PKG_CANDIDATES[i]); } catch (e) { ok = false; }
+      if (ok) { hit = PKG_CANDIDATES[i]; break; }
+    }
+    if (hit && hit !== cfg.mapPkg) {
+      cfg.mapPkg = hit;
+      $('appPkg').value = hit;
+      saveCfg();
+      toast('已识别到本机地图：' + hit);
+    }
+  }
   $('setBtn').onclick = openPanel;
   $('btnClose').onclick = closePanel;
   // 逃生通道：万一设成了默认桌面又想把主屏改回去，从这里进系统设置
@@ -1157,11 +1241,8 @@ body.night #scalebar { color: #2b2f36; }
       if (onChange) onChange(cfg[key]);
     };
   }
-  bindSw('swNight', 'night', function (on) {
-    body.className = on ? 'night' : '';
-    if (amapObj && amapObj.setMapStyle) {                 // 高德跟着换深色底图
-      amapObj.setMapStyle(on ? 'amap://styles/dark' : 'amap://styles/whitesmoke');
-    }
+  bindSw('swNight', 'night', function () {
+    body.className = cfg.night ? 'night' : '';
     setTimeout(drawMap, 60);
   });
   bindSw('swBoot', 'boot');
@@ -1175,23 +1256,65 @@ body.night #scalebar { color: #2b2f36; }
   bindSw('swScale', 'lScale', function (on) { $('scalebar').style.display = on ? 'block' : 'none'; });
   bindSw('swTraffic', 'lTraffic', function () { drawMap(); });
 
+  /* 车机上手指粗、开关又小：点整行也能切换开关（点开关本身仍走它自己的逻辑，不会双触发） */
+  var rowSwIds = ['swNight', 'swBoot', 'swRail', 'swVoice', 'swNav', 'swClk', 'swScale', 'swTraffic'];
+  for (var ri = 0; ri < rowSwIds.length; ri++) {
+    (function (el) {
+      if (!el || !el.parentNode) { return; }
+      el.parentNode.onclick = function (e) {
+        var t = e.target || e.srcElement;
+        if (t === el) { return; }
+        if (el.contains && el.contains(t)) { return; }
+        el.click();
+      };
+    })($(rowSwIds[ri]));
+  }
+
+  /* 地图源：点一下立刻生效 —— 不用再去找底部的「保存并应用」，
+     车机上少一步操作就少一个坑（之前那版就是因为按钮被切出屏幕点不到）。 */
+  function normPkg(v) {
+    return (v || '').replace(/^\s+|\s+$/g, '').replace(/[^\x21-\x7e]/g, '');
+  }
   var segItems = $('segSrc').getElementsByTagName('b');
   for (var sg = 0; sg < segItems.length; sg++) {
     segItems[sg].onclick = function () {
       cfg.mapSrc = this.getAttribute('data-v');
       for (var m = 0; m < segItems.length; m++) { segItems[m].className = ''; }
       this.className = 'on';
+      saveCfg();
+      applyMapSource();
+      toast('地图源：' + (cfg.mapSrc === 'app' ? '本机地图 App' : '界面示意图'));
     };
   }
 
+  /* 包名快捷填入（车机上敲包名很痛苦，点一下就行） */
+  var quickItems = $('pkgQuick').getElementsByTagName('b');
+  for (var qi = 0; qi < quickItems.length; qi++) {
+    quickItems[qi].onclick = function () {
+      var p = this.getAttribute('data-pkg');
+      cfg.mapPkg = p;
+      $('appPkg').value = p;
+      saveCfg();
+      applyMapSource();
+      toast('已选：' + p);
+    };
+  }
+
+  /* 输入框里按回车 = 保存并生效 */
+  $('appPkg').onkeydown = function (e) {
+    var k = e ? (e.keyCode || e.which) : 0;
+    if (k === 13) { $('btnSave').click(); }
+  };
+
   $('btnSave').onclick = function () {
-    cfg.amapKey = ($('amapKey').value || '').replace(/^\s+|\s+$/g, '');
-    cfg.amapKey = cfg.amapKey.replace(/[^\x21-\x7e]/g, '');   // 去掉粘贴带进来的空格/中文
+    var p = normPkg($('appPkg').value);
+    if (p) { cfg.mapPkg = p; }
+    $('appPkg').value = cfg.mapPkg;
     saveCfg();
     applyCfg();
     applyMapSource();
     closePanel();
-    toast('设置已保存');
+    toast('设置已保存：' + (cfg.mapSrc === 'app' ? cfg.mapPkg : '示意图'));
   };
 
   function applyCfg() {
@@ -1222,7 +1345,7 @@ body.night #scalebar { color: #2b2f36; }
         if (act === 'vol-up' || act === 'vol-down') {
           bridge('setVolume', act === 'vol-up' ? 1 : -1, tip + '（待安卓侧接入）');
         } else if (act === 'search') {
-          bridge('openApp', 'com.autonavi.amapautp', '搜索：待接入高德车机版');
+          openMapApp();               // 搜索也交给本机地图 App
         } else if (act === 'locate') {
           recenter();
           toast('已回到当前位置');
@@ -1256,88 +1379,73 @@ body.night #scalebar { color: #2b2f36; }
   };
 
   /* =========================================================================
-     8. 地图 [AMAP]
+     8. 地图 [本机地图 App]
      -------------------------------------------------------------------------
-     默认用 Canvas 画一张"示意地图"，零依赖、零流量、老内核也流畅。
-     想换成真正的高德地图（需要联网 + key）：
-       1) 在 </body> 前引入：
-          <script src="https://webapi.amap.com/maps?v=2.0&key=你的KEY"><\/script>
-       2) 把 initMap() 换成：
-          var map = new AMap.Map('mapwrap', {zoom: 16, center: [116.397, 39.909]});
-          map.setMapStyle('amap://styles/normal');
-       注意：高德 JS API 2.0 需要 Chrome 60+ 内核，老车机建议用 1.4 版本。
+     右侧这张图是 Canvas 画出来的"示意地图"（零依赖、零流量、老内核也流畅），
+     它有两个作用：
+       1) 把分屏视觉填满，但不当真图用；
+       2) 整块地图区可点 —— 点一下就按 cfg.mapPkg 拉起车机上装的那个地图 App。
+     真地图不在网页里渲染：别的 App 的画面没法被 WebView 嵌进来，
+     要真图就跳出去用你装的那个（魔改版也走同一条路，只是包名不同）。
      ========================================================================= */
   var cv = $('mapCanvas');
   var ctx = cv.getContext('2d');
   var W = 0, H = 0, dpr = 1;
   var cam = { x: 0, y: 0 };           // 车辆在路线上的位置 0~1
   var dir = 1;
-  var mapMode = 'demo';               // demo = Canvas 示意地图 / amap = 真高德
-  var amapObj = null, amapLoading = false, amapMarker = null;
+  var mapMode = 'demo';               // 只保留 Canvas 示意图，真地图交给本机 App
 
-  /* --- 高德 JS API 1.4（老 WebView 稳妥版） --- */
-  var AMAP_ROUTE = [
-    [113.1130, 23.0310], [113.1180, 23.0290], [113.1230, 23.0265],
-    [113.1290, 23.0240], [113.1350, 23.0205], [113.1410, 23.0165]
-  ];
-  function setMapMode(m) {
-    mapMode = m;
-    cv.style.display = m === 'demo' ? 'block' : 'none';
-    $('amapBox').style.display = m === 'amap' ? 'block' : 'none';
-    if (m === 'demo') { resizeMap(); drawMap(); }
-  }
-  function loadAMap(cb) {
-    if (amapLoading) return;
-    amapLoading = true;
-    var sc = document.createElement('script');
-    sc.src = 'https://webapi.amap.com/maps?v=1.4.15&key=' + encodeURIComponent(cfg.amapKey);
-    sc.onload = function () { amapLoading = false; cb(!!window.AMap); };
-    sc.onerror = function () { amapLoading = false; cb(false); };
-    document.body.appendChild(sc);
-  }
-  function initAMap() {
-    if (amapObj) { amapObj.resize(); setMapMode('amap'); return; }
-    try {
-      amapObj = new AMap.Map('amapBox', {
-        zoom: 16,
-        center: AMAP_ROUTE[2],
-        resizeEnable: true,
-        mapStyle: cfg.night ? 'amap://styles/dark' : 'amap://styles/whitesmoke'
-      });
-      new AMap.Polyline({
-        path: AMAP_ROUTE, strokeColor: '#33a852', strokeWeight: 8,
-        strokeOpacity: 0.95, lineJoin: 'round', showDir: true
-      }).setMap(amapObj);
-      amapMarker = new AMap.Marker({
-        position: AMAP_ROUTE[2],
-        content: '<div class="carMark"></div>',
-        offset: new AMap.Pixel(-13, -13)
-      });
-      amapMarker.setMap(amapObj);
-      setMapMode('amap');
-      toast('高德地图已加载');
-    } catch (e) {
-      toast('高德初始化失败，已回退示意地图');
-      setMapMode('demo');
+  /* --- 打开本机地图 App ------------------------------------------------
+     为什么砍掉「高德 Web JS API」：车机上装的都是魔改版车机地图，
+     那套方案要求在网页里跑正版 JS API（还得申请 Web端 key + 关域名白名单），
+     跟魔改版是两条互不相干的路，纯属白折腾。
+     改成最直接的一条：点地图区 → 按包名直接拉起你装的那个地图 App。
+     -------------------------------------------------------------------- */
+  function openMapApp() {
+    var pkg = normPkg(cfg.mapPkg) || 'com.autonavi.amapautp';
+    if (!hasBridge()) {
+      toast('浏览器预览：装成 APK 后这里会打开 ' + pkg);
+      return;
     }
+    if (canProbePkg()) {
+      var ok = false;
+      try { ok = !!window.CarBridge.hasApp(pkg); } catch (e) { ok = false; }
+      if (!ok) {
+        // 包名不对/没装：不只丢一句「打不开」，直接把人送到设置里改包名
+        toast('没装 ' + pkg + '，已打开设置，换个包名试试');
+        openPanel();
+        return;
+      }
+    }
+    toast('正在打开本机地图…');
+    bridge('openApp', pkg, '打开地图：待安卓侧接入');
   }
+
   function applyMapSource() {
-    if (cfg.mapSrc === 'amap' && cfg.amapKey) {
-      if (window.AMap) { initAMap(); return; }
-      toast('正在加载高德地图…');
-      loadAMap(function (ok) {
-        if (ok) { initAMap(); }
-        else {
-          toast('高德加载失败（key 或网络问题），已回退示意地图');
-          cfg.mapSrc = 'demo';
-          applyCfg();
-          setMapMode('demo');
-        }
-      });
-    } else {
-      setMapMode('demo');
-    }
+    // mapSrc 只影响「地图区的标识」：demo = 纯示意背景，app = 明确指向本机地图 App
+    var isApp = cfg.mapSrc === 'app';
+    var btn = $('mapOpenBtn');
+    btn.className = isApp ? 'on' : '';
+    btn.innerHTML = isApp ? '打开本机地图 · ' + (cfg.mapPkg || '')
+                         : '点这里打开本机地图';
+    $('mapwrap').className = 'tapable';
+    mapMode = 'demo';
+    resizeMap();
+    drawMap();
   }
+
+  /* 地图区：点哪儿都能打开本机地图（不用先去设置里找开关） */
+  $('mapwrap').onclick = function (e) {
+    var t = e.target || e.srcElement;
+    if (!t) { return; }
+    var id = t.id || '';
+    var pid = (t.parentNode && t.parentNode.id) ? t.parentNode.id : '';
+    if (id === 'mapOpenBtn') { openMapApp(); return; }
+    // 地图上那几个浮层（转向卡/时钟/速度/比例尺）的点击不算「开地图」
+    if (id === 'navCard' || id === 'scalebar' || id === 'mapClock' || id === 'mapSpeed') { return; }
+    if (pid === 'navCard' || pid === 'scalebar' || pid === 'mapClock' || pid === 'mapSpeed') { return; }
+    openMapApp();
+  };
 
   // 路线折线（相对坐标 0~1，在 resize 时映射到画布）
   var route = [
@@ -1508,23 +1616,13 @@ body.night #scalebar { color: #2b2f36; }
     cam.x += 0.00035 * dir;
     if (cam.x > 1) { cam.x = 1; dir = -1; }
     if (cam.x < 0) { cam.x = 0; dir = 1; }
-    if (mapMode === 'demo') { drawMap(); }
-    else if (amapMarker) {
-      // 高德模式下把自车标记按同一进度挪位置
-      var seg = cam.x * (AMAP_ROUTE.length - 1);
-      var si = Math.floor(seg);
-      if (si > AMAP_ROUTE.length - 2) { si = AMAP_ROUTE.length - 2; }
-      var t = seg - si;
-      var a = AMAP_ROUTE[si], b = AMAP_ROUTE[si + 1];
-      amapMarker.setPosition([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-    }
+    drawMap();
     setTimeout(loop, 60);
   }
 
   function onResize() {
     resizeMap();
     drawMap();
-    if (amapObj) { amapObj.resize(); }
   }
   window.onresize = onResize;
   recenter();
