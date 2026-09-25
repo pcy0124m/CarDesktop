@@ -1065,6 +1065,12 @@ body.night #scalebar { color: #2b2f36; }
         <b class="on" data-v="demo">示意图</b><b data-v="app">本机地图</b>
       </div>
     </div>
+    <div class="prow">
+      <span>悬浮窗停靠</span>
+      <div class="seg" id="segDock">
+        <b data-v="left">靠左</b><b class="on" data-v="mid">居中</b><b data-v="right">靠右</b>
+      </div>
+    </div>
     <div class="prow col">
       <span>本机地图 App（点一下直接挑，或手动填包名）</span>
       <div class="pkgQuick" id="pkgQuick">
@@ -1274,7 +1280,7 @@ body.night #scalebar { color: #2b2f36; }
   var CFG_KEY = 'cardesk_cfg';
   var cfg = {
     night: false, boot: true, rail: true, voice: true,
-    split: 34, mapSrc: 'demo', mapPkg: 'com.autonavi.amapautp', mapAction: 'com.autonavi.plus',
+    split: 34, mapSrc: 'demo', mapPkg: 'com.autonavi.amapautp', mapAction: 'com.autonavi.plus', mapDock: 'mid',
     lNav: true, lClk: true, lScale: true, lTraffic: true
   };
   function prefGet(k) {
@@ -1399,6 +1405,20 @@ body.night #scalebar { color: #2b2f36; }
       saveCfg();
       applyMapSource();
       toast('地图源：' + (cfg.mapSrc === 'app' ? '本机地图 App' : '界面示意图'));
+    };
+  }
+  /* 悬浮窗停靠位置：魔改包把悬浮窗固定成手机竖屏比例，宽度改不了，
+     只能决定它落在地图块的左边、中间还是右边 */
+  var dockItems = $('segDock').getElementsByTagName('b');
+  for (var dg = 0; dg < dockItems.length; dg++) {
+    dockItems[dg].onclick = function () {
+      cfg.mapDock = this.getAttribute('data-v');
+      saveCfg();
+      for (var m = 0; m < dockItems.length; m++) {
+        dockItems[m].className = dockItems[m].getAttribute('data-v') === cfg.mapDock ? 'on' : '';
+      }
+      syncMapWindow(0);
+      toast('悬浮窗停靠：' + this.innerHTML);
     };
   }
 
@@ -1558,6 +1578,10 @@ body.night #scalebar { color: #2b2f36; }
     for (var m = 0; m < segItems.length; m++) {
       segItems[m].className = segItems[m].getAttribute('data-v') === cfg.mapSrc ? 'on' : '';
     }
+    var dItems = $('segDock').getElementsByTagName('b');
+    for (var d2 = 0; d2 < dItems.length; d2++) {
+      dItems[d2].className = dItems[d2].getAttribute('data-v') === (cfg.mapDock || 'mid') ? 'on' : '';
+    }
     setTimeout(drawMap, 60);
   }
 
@@ -1696,10 +1720,19 @@ body.night #scalebar { color: #2b2f36; }
   function sendMapWindow(show) {
     if (!hasBridge() || typeof window.CarBridge.mapWindow !== 'function') { return; }
     var r = $('mapwrap').getBoundingClientRect();
+    /* 真机实测（两张截图对比）：魔改包把悬浮窗固定成手机竖屏比例 ——
+     * 高度吃我们传的值，宽度 ≈ 高/2 自己算，横向铺满做不到。
+     * 所以按 高*0.5 估算实际显示宽度，把 x 算到停靠位（左/中/右）。 */
+    var winW = r.height * 0.5;
+    var x = r.left;
+    if (cfg.mapDock === 'mid') { x = r.left + (r.width - winW) / 2; }
+    else if (cfg.mapDock === 'right') { x = r.left + r.width - winW; }
+    if (x < r.left) { x = r.left; }
+    if (x + winW > r.right) { x = r.left + r.width - winW; }
     try {
       window.CarBridge.mapWindow(show,
-        Math.round(r.left), Math.round(r.top),
-        Math.round(r.width), Math.round(r.height),
+        Math.round(x), Math.round(r.top),
+        Math.round(winW), Math.round(r.height),
         normPkg(cfg.mapPkg), normPkg(cfg.mapAction) || 'com.autonavi.plus');
     } catch (e) { }
   }
