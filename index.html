@@ -785,6 +785,20 @@ body.night #mapOpenBtn.on { background: #e1251b; color: #fff; }
 .sw.on { background: #e1251b; }
 .sw.on i { left: 3.52vh; }
 #panel .pinfo { font-size: 1.7vh; color: #9a9da4; line-height: 1.45; margin-top: 1vh; }
+/* 悬浮窗重置按钮（小号，跟在停靠行下面） */
+#btnMapReset {
+  height: 4.2vh;
+  padding: 0 1.8vh;
+  font-size: 1.9vh;
+  font-family: inherit;
+  border: 0;
+  border-radius: 0.8vh;
+  background: #eceef2;
+  color: #4a4c52;
+  cursor: pointer;
+}
+#btnMapReset:active { opacity: .8; }
+body.night #btnMapReset { background: #2a2e36; color: #c9ccd3; }
 
 /* ======================= 提示气泡 ======================= */
 #toast {
@@ -1070,6 +1084,10 @@ body.night #scalebar { color: #2b2f36; }
       <div class="seg" id="segDock">
         <b data-v="left">靠左</b><b class="on" data-v="mid">居中</b><b data-v="right">靠右</b>
       </div>
+    </div>
+    <div class="prow">
+      <span>悬浮窗黑屏/位置不对？</span>
+      <button id="btnMapReset" type="button">重置悬浮窗</button>
     </div>
     <div class="prow col">
       <span>本机地图 App（点一下直接挑，或手动填包名）</span>
@@ -1421,6 +1439,7 @@ body.night #scalebar { color: #2b2f36; }
       toast('悬浮窗停靠：' + this.innerHTML);
     };
   }
+  $('btnMapReset').onclick = function () { resetMapWindow(); };
 
   /* ---------- 应用选择器：从车机已装的 App 里直接挑地图 ----------
      CarBridge.listApps() 返回 [{"p":包名,"l":应用名},...]，
@@ -1717,7 +1736,8 @@ body.night #scalebar { color: #2b2f36; }
      网页全屏沉浸，getBoundingClientRect() 出来的就是屏幕坐标。
      你的魔改包不带这套广播时，地图不会出现 —— 退回点地图打开全屏。 */
   var mapWinTimer = null;
-  function sendMapWindow(show) {
+  var lastMapWin = null;   // 上次 show 的参数指纹，用于去重
+  function sendMapWindow(show, force) {
     if (!hasBridge() || typeof window.CarBridge.mapWindow !== 'function') { return; }
     var r = $('mapwrap').getBoundingClientRect();
     /* 真机实测（两张截图对比）：魔改包把悬浮窗固定成手机竖屏比例 ——
@@ -1729,16 +1749,22 @@ body.night #scalebar { color: #2b2f36; }
     else if (cfg.mapDock === 'right') { x = r.left + r.width - winW; }
     if (x < r.left) { x = r.left; }
     if (x + winW > r.right) { x = r.left + r.width - winW; }
+    var fp = [Math.round(x), Math.round(r.top), Math.round(winW), Math.round(r.height),
+              normPkg(cfg.mapPkg), normPkg(cfg.mapAction) || 'com.autonavi.plus'].join('|');
+    /* 去重：参数没变就不再发 show。魔改包每收到一次 show 都会重建窗口，
+     * 真机实测反复重建会把它的渲染面搞挂（整块黑屏），所以能省则省。 */
+    if (show && !force && lastMapWin === fp) { return; }
     try {
       window.CarBridge.mapWindow(show,
         Math.round(x), Math.round(r.top),
         Math.round(winW), Math.round(r.height),
         normPkg(cfg.mapPkg), normPkg(cfg.mapAction) || 'com.autonavi.plus');
+      lastMapWin = show ? fp : null;
     } catch (e) { }
   }
   /* 布局会变（分屏切换/旋转），拖个尾巴等稳定了再发，免得悬浮窗来回跳。
-     CSS 过渡约 320ms，450ms 时可能还差几个像素 —— 所以隔半秒再补发一次，
-     让悬浮窗最终精确对齐地图块。 */
+     CSS 过渡约 320ms，450ms 时可能还差几个像素 —— 所以隔半秒再补发一次；
+     补发不带 force，坐标没漂就被去重跳过，漂了才真正重发。 */
   function syncMapWindow(delay) {
     if (cfg.mapSrc !== 'app') { return; }
     if (mapWinTimer) { clearTimeout(mapWinTimer); }
@@ -1749,7 +1775,15 @@ body.night #scalebar { color: #2b2f36; }
   }
   function hideMapWindow() {
     if (mapWinTimer) { clearTimeout(mapWinTimer); mapWinTimer = null; }
+    lastMapWin = null;
     sendMapWindow(false);
+  }
+  /* 悬浮窗救急：先收掉再放出来，给它一次干净的重建机会。
+     真机出现过整块黑屏（渲染面挂了），这个按钮就是那时候用的。 */
+  function resetMapWindow() {
+    hideMapWindow();
+    toast('正在重置悬浮地图…');
+    setTimeout(function () { sendMapWindow(true, true); }, 900);
   }
 
   /* 地图区：点哪儿都能打开本机地图（不用先去设置里找开关） */
