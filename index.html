@@ -847,6 +847,42 @@ body.night .pbtns { border-top-color: #2a2e36; }
 body.night .pbtns button { background: #2a2e36; color: #c9ccd3; }
 body.night .pbtns button:last-child { background: #e1251b; color: #fff; }
 body.night #scalebar { color: #2b2f36; }
+
+/* ---------- 媒体音量 HUD ---------- */
+#volHud {
+  position: absolute;
+  left: 41%;
+  bottom: 2.6vh;
+  height: 5.4vh;
+  line-height: 5.4vh;
+  padding: 0 2.2vh;
+  background: rgba(24, 26, 30, .84);
+  border-radius: 2.7vh;
+  color: #fff;
+  font-size: 2vh;
+  white-space: nowrap;
+  display: none;
+  z-index: 90;
+}
+#volHud .vtrack {
+  display: inline-block;
+  width: 16vh;
+  height: 1.3vh;
+  background: rgba(255, 255, 255, .28);
+  border-radius: .65vh;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 1.4vh;
+}
+#volHud .vtrack i {
+  display: block;
+  height: 100%;
+  width: 50%;
+  background: #4cc36a;
+  border-radius: .65vh;
+}
+#volHud.muted #volTxt { color: #ff8d84; }
+#volHud.muted .vtrack i { background: #8a8f98; }
 </style>
 </head>
 <body>
@@ -1526,6 +1562,31 @@ body.night #scalebar { color: #2b2f36; }
   }
 
   /* =========================== 7. 左侧 & 播放按钮 =========================== */
+  /* 媒体音量：安卓桥返回 "当前/最大"，拿它画 HUD；浏览器预览走假音量 */
+  var volFake = 8, volTimer = null;
+  function showVolHud(cur, max) {
+    var pct = max > 0 ? Math.round(cur / max * 100) : 0;
+    var hud = $('volHud');
+    hud.className = pct === 0 ? 'muted' : '';
+    $('volFill').style.width = pct + '%';
+    $('volTxt').innerHTML = (pct === 0 ? '静音 ' : '媒体音量 ') + cur + '/' + max;
+    hud.style.display = 'block';
+    if (volTimer) { clearTimeout(volTimer); }
+    volTimer = setTimeout(function () { hud.style.display = 'none'; }, 1800);
+  }
+  function changeVol(step) {
+    if (hasBridge() && typeof window.CarBridge.setVolume === 'function') {
+      var r = '';
+      try { r = window.CarBridge.setVolume(step); } catch (e) {}
+      var pp = r.split('/');
+      if (pp.length === 2 && !isNaN(parseInt(pp[0], 10))) {
+        showVolHud(parseInt(pp[0], 10), parseInt(pp[1], 10) || 15);
+        return;
+      }
+    }
+    volFake = Math.max(0, Math.min(15, volFake + step));
+    showVolHud(volFake, 15);
+  }
   var railBtns = document.querySelectorAll('.rbtn');
   for (var i = 0; i < railBtns.length; i++) {
     railBtns[i].onclick = (function (el) {
@@ -1533,7 +1594,7 @@ body.night #scalebar { color: #2b2f36; }
         var act = el.getAttribute('data-act');
         var tip = el.getAttribute('data-tip') || '';
         if (act === 'vol-up' || act === 'vol-down') {
-          bridge('setVolume', act === 'vol-up' ? 1 : -1, tip + '（待安卓侧接入）');
+          changeVol(act === 'vol-up' ? 1 : -1);
         } else if (act === 'search') {
           openMapApp();               // 搜索也交给本机地图 App
         } else if (act === 'locate') {
@@ -1864,5 +1925,10 @@ body.night #scalebar { color: #2b2f36; }
   setTimeout(function () { toast('车机桌面已就绪 · 点击左列数字可演示巡航'); }, 700);
 })();
 </script>
+<!-- 媒体音量 HUD：按 +/- 弹出，静音标红 -->
+<div id="volHud">
+  <span id="volTxt">8/15</span>
+  <span class="vtrack"><i id="volFill"></i></span>
+</div>
 </body>
 </html>

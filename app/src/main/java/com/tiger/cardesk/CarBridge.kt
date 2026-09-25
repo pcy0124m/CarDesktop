@@ -71,20 +71,37 @@ class CarBridge(private val act: Activity) {
         }
     }
 
+    /**
+     * 调媒体音量，返回调整后的 "当前/最大"（如 "6/15"），网页端拿它画音量条。
+     * 不用 FLAG_SHOW_UI：系统那个音量条在车机横屏上位置不可控，
+     * 桌面自己画 HUD（还能把「静音 0/15」标红），反馈更直观。
+     * AudioManager 允许在任意线程调用，这里就不 post 了，保证返回值是调完之后的。
+     */
     @JavascriptInterface
-    fun setVolume(step: Int) {
-        ui.post {
-            try {
-                val am = act.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(
-                    AudioManager.STREAM_MUSIC,
-                    if (step >= 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
-                    AudioManager.FLAG_SHOW_UI
-                )
-            } catch (e: Exception) {
-            }
+    fun setVolume(step: Int): String {
+        return try {
+            val am = act.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.adjustStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                if (step >= 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                0
+            )
+            volString(am)
+        } catch (e: Exception) {
+            ""
         }
     }
+
+    /** 当前媒体音量 "当前/最大"，网页端打开面板时可以先显示一次 */
+    @JavascriptInterface
+    fun getVolume(): String = try {
+        volString(act.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+    } catch (e: Exception) {
+        ""
+    }
+
+    private fun volString(am: AudioManager): String =
+        "${am.getStreamVolume(AudioManager.STREAM_MUSIC)}/${am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}"
 
     // ---------------------------------------------------------------- 拉起别的 App
     /**
@@ -191,8 +208,20 @@ class CarBridge(private val act: Activity) {
             val i = Intent(action)
             if (p.isNotBlank()) i.setPackage(p)
             if (show) {
-                i.putExtra("x", x).putExtra("y", y)
-                i.putExtra("w", w).putExtra("h", h)
+                /* 网页端 getBoundingClientRect() 给的是 CSS 像素，悬浮窗用的是物理像素。
+                 * 实测（1600x900 / density 1.5 车机）：不乘密度，地图会缩在屏幕左上
+                 * 2/3 处 —— 窗口出现在 x=403，而正确位置是 401*1.5≈602。 */
+                val d = act.resources.displayMetrics.density
+                val ix = Math.round(x * d)
+                val iy = Math.round(y * d)
+                val iw = Math.round(w * d)
+                val ih = Math.round(h * d)
+                i.putExtra("x", ix).putExtra("y", iy)
+                i.putExtra("w", iw).putExtra("h", ih)
+                /* 实测这套魔改包对 w/h 两个 extra 不一定都认（窗口用了自己的默认尺寸），
+                 * 把常见别名一起塞上 —— 接收方只读自己认识的键，多余的会被忽略。 */
+                i.putExtra("left", ix).putExtra("top", iy)
+                i.putExtra("width", iw).putExtra("height", ih)
             }
             act.sendBroadcast(i)
         } catch (e: Exception) {
