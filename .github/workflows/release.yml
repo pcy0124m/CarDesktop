@@ -1,0 +1,135 @@
+name: Build & Sign CarDesktop Release
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+# 创建 Release 需要写权限；仓库默认 token 只读时必须显式声明
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PATH: app/release.keystore
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        run: |
+          export ANDROID_HOME="/usr/local/lib/android/sdk"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Check signing secrets
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "::error::KEYSTORE_BASE64 未配置。请先在仓库 Settings → Secrets and variables → Actions 添加 KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD 四个密钥。"
+            exit 1
+          fi
+
+      - name: Decode signing keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 版本号三处同源（tag / versionName / versionCode），杜绝
+      # 「tag 涨了、versionCode 没涨」导致车机覆盖安装被拒的问题
+      - name: Compute version
+        id: ver
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VN="${GITHUB_REF_NAME#v}"
+          else
+            VN="0.1.${GITHUB_RUN_NUMBER}"
+          fi
+          VC=$(echo "$VN" | awk -F. '{printf "%d", $1*10000 + $2*100 + $3}')
+          echo "version_name=$VN" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VC"  >> "$GITHUB_OUTPUT"
+          echo "tag=v$VN"          >> "$GITHUB_OUTPUT"
+          echo "本次版本：name=$VN code=$VC tag=v$VN"
+
+      - name: Build signed release APK
+        env:
+          VERSION_CODE: ${{ steps.ver.outputs.version_code }}
+          VERSION_NAME: ${{ steps.ver.outputs.version_name }}
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # 关键自检：证明「签名有效」且「32 位车机装得上」
+      # 本工程无 native 代码，期望 native-code 为空（=全架构通用包）
+      - name: Verify signature and ABI
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "== APK =="; ls -lh "$APK"
+          echo "== 签名 =="; "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "$APK"
+          echo "== badging =="; "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging "$APK" | head -5
+          echo "== native-code（空 = 32/64 位通吃）=="
+          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging "$APK" | grep -i "native-code" || echo "（无 native 库，全架构通用）"
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp app/build/outputs/apk/release/*.apk release-assets/CarDesktop-release.apk
+          ls -lh release-assets
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardesk-release-apk
+          path: release-assets/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="${{ steps.ver.outputs.tag }}"
+          cat > release-notes.md <<EOF
+          车机桌面 · 已签名安装包，由 GitHub Actions 自动构建。
+
+          - 构建来源：run #${GITHUB_RUN_NUMBER}
+          - 提交：\`${GITHUB_SHA}\`
+          - 版本：\`${{ steps.ver.outputs.version_name }}\`（versionCode \`${{ steps.ver.outputs.version_code }}\`）
+
+          | 项 | 值 |
+          |---|---|
+          | 包名 | \`com.tiger.cardesk\` |
+          | 架构 | 全架构通用包（无 native 库）→ 32 位车机可直接安装 |
+          | 最低系统 | Android 5.0（API 21），车机 Android 8 实测目标 |
+          | 界面 | 单文件 HTML，直接改仓库根目录 \`index.html\` 即可换界面 |
+
+          安装：拷到车机（U 盘 / adb install）安装后打开；想要它当主屏，
+          在车机「设置 → 默认应用 → 主屏幕应用」里选「车机桌面」。
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，改为覆盖上传"
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "车机桌面 $TAG" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA"
+          fi

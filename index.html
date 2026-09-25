@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<meta name="screen-orientation" content="landscape">
+<title>车机桌面</title>
+<!--
+  ============================================================================
+  车机桌面 · 单文件版    作者：虎头 🐯
+  ----------------------------------------------------------------------------
+  兼容目标：Android 4.4+ 系统 WebView（Chrome 33 起）
+  刻意回避的写法：CSS 变量 / flex gap / grid / clamp / :is() / ES6 语法
+  单位策略：字号与关键尺寸全部走 vh，任何横屏分辨率都能等比铺满
+  ----------------------------------------------------------------------------
+  接入真实数据的位置（搜这几个关键字就能找到）：
+    1) [BRIDGE]  —— 与安卓侧 JavascriptInterface 通信（媒体控制、速度、GPS）
+    2) [WEATHER] —— 天气接口（和风天气 / 心知天气）
+    3) [AMAP]    —— 高德 JS API 接入点（默认用 Canvas 画示意地图）
+  ============================================================================
+-->
+<style>
+/* ======================= 基础重置 ======================= */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", "Heiti SC", "WenQuanYi Micro Hei", sans-serif;
+  color: #2b2b2e;
+  background: #e3e5e9;
+  -webkit-transition: background .25s;
+  transition: background .25s;
+}
+.red { color: #e1251b; }
+
+/* ======================= 整体骨架 ======================= */
+#app {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  padding: 0.9vh 1vh 1vh 1vh;
+}
+
+/* ======================= 顶部状态栏 ======================= */
+#topbar {
+  height: 6.6vh;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+  padding: 0 0.8vh;
+  font-size: 2.05vh;
+  color: #2f3033;
+}
+#clock {
+  display: inline-block;
+  background: #e1251b;
+  color: #fff;
+  font-weight: 700;
+  font-size: 2.35vh;
+  line-height: 1;
+  padding: 0.9vh 1.1vh;
+  border-radius: 0.7vh;
+  letter-spacing: 0.05vh;
+  margin-right: 1.6vh;
+  font-family: "DIN Alternate", "Arial Narrow", Arial, sans-serif;
+}
+#date { white-space: nowrap; font-size: 2.05vh; }
+#date .lunar { color: #6b6d72; font-size: 1.85vh; margin-left: 0.6vh; }
+.spacer {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+}
+.top-item {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  height: 4.4vh;
+  padding: 0 1.1vh;
+  margin-left: 0.8vh;
+  border-radius: 0.7vh;
+  font-size: 1.95vh;
+  color: #35363a;
+  cursor: pointer;
+  -webkit-transition: background .15s;
+  transition: background .15s;
+}
+.top-item:active { background: rgba(0,0,0,0.08); }
+.top-item.sel { background: #fff; box-shadow: 0 0.2vh 0.6vh rgba(0,0,0,.07); }
+#conn { color: #e1251b; font-weight: 600; }
+#conn .dot {
+  width: 0.9vh; height: 0.9vh; border-radius: 50%;
+  background: #e1251b; margin-right: 0.7vh;
+  display: inline-block;
+}
+.warn {
+  color: #f2a900; font-size: 2.4vh; margin-left: 1.2vh; margin-right: 0.4vh;
+  line-height: 1;
+}
+.caret {
+  width: 0; height: 0;
+  border-left: 0.55vh solid transparent;
+  border-right: 0.55vh solid transparent;
+  border-top: 0.7vh solid #8b8d92;
+  margin-left: 0.7vh;
+}
+.ico-btn {
+  width: 4.4vh; height: 4.4vh; border-radius: 0.8vh;
+  margin-left: 0.8vh; cursor: pointer;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+}
+.ico-btn:active { background: rgba(0,0,0,0.08); }
+
+/* ======================= 主体 ======================= */
+#main {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  min-height: 0;
+}
+
+/* 左侧竖向按钮条 */
+#rail {
+  width: 6.6vh;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  padding-top: 0.6vh;
+}
+.rbtn {
+  width: 5.2vh; height: 5.2vh;
+  border-radius: 50%;
+  margin-bottom: 1.5vh;
+  background: #f4f5f7;
+  border: 0.16vh solid #cbced4;
+  color: #55575c;
+  cursor: pointer;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  -webkit-transition: -webkit-transform .12s, background .15s;
+  transition: transform .12s, background .15s;
+}
+.rbtn svg { width: 2.6vh; height: 2.6vh; display: block; }
+.rbtn:active { background: #e2e4e9; -webkit-transform: scale(0.92); transform: scale(0.92); }
+.rbtn.dashed {
+  background: transparent;
+  border: 0.18vh dashed #b6b9c0;
+  color: #9a9da4;
+}
+
+/* 左列内容 */
+#left {
+  width: 34%;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  min-width: 0;
+  -webkit-transition: width .3s ease;
+  transition: width .3s ease;
+  padding-right: 1vh;
+}
+.card {
+  background: #fff;
+  border-radius: 1.1vh;
+  box-shadow: 0 0.25vh 0.7vh rgba(20,25,40,.06);
+  margin-bottom: 1vh;
+  -webkit-transition: background .25s, color .25s;
+  transition: background .25s, color .25s;
+}
+
+/* ---- 速度卡 ---- */
+#speed {
+  position: relative;
+  height: 25%;
+  padding: 1.6vh 1.8vh;
+  overflow: hidden;
+}
+#spdNum {
+  font-family: "DIN Alternate", "Arial Narrow", Arial, sans-serif;
+  font-size: 12.5vh;
+  line-height: 0.86;
+  font-weight: 700;
+  color: #e1251b;
+  letter-spacing: -0.3vh;
+  cursor: pointer;
+}
+#spdUnit {
+  position: absolute;
+  right: 2vh;
+  top: 3.4vh;
+  font-size: 2.4vh;
+  color: #9a9da4;
+  font-weight: 500;
+}
+#navBtn {
+  position: absolute;
+  left: 1.8vh;
+  bottom: 1.5vh;
+  background: #63666d;
+  color: #fff;
+  font-size: 1.95vh;
+  line-height: 1;
+  padding: 1.05vh 2.2vh;
+  border: 0;
+  border-radius: 0.7vh;
+  cursor: pointer;
+  font-family: inherit;
+}
+#navBtn:active { background: #4e5158; }
+#navBtn.on { background: #2f8f3f; }
+#spdHint {
+  position: absolute;
+  right: 2vh; bottom: 2.2vh;
+  font-size: 1.7vh; color: #b6b9c0;
+}
+
+/* ---- 天气卡 ---- */
+#weather {
+  height: 15%;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  padding: 0 1.2vh;
+}
+.witem {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  min-width: 0;
+}
+.witem svg { width: 2.9vh; height: 2.9vh; -webkit-flex-shrink: 0; flex-shrink: 0; margin-right: 0.7vh; }
+.wval {
+  font-size: 2.3vh;
+  font-weight: 600;
+  color: #35363a;
+  white-space: nowrap;
+}
+.wval .u { font-size: 1.8vh; font-weight: 400; color: #86888e; margin-left: 0.2vh; }
+.wval.dir { font-size: 1.9vh; }
+
+/* ---- 音乐卡 ---- */
+#music {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  padding: 1.5vh 1.6vh 1.2vh 1.6vh;
+  margin-bottom: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+#mtitle {
+  font-size: 2.35vh;
+  font-weight: 700;
+  color: #e1251b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 0.9vh;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+}
+#mmeta {
+  font-size: 1.9vh;
+  color: #55575c;
+  margin-bottom: 0.6vh;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+}
+#mmeta .tag {
+  display: inline-block;
+  background: #e1251b;
+  color: #fff;
+  font-size: 1.7vh;
+  line-height: 1;
+  padding: 0.45vh 0.6vh;
+  border-radius: 0.4vh;
+  margin-right: 0.5vh;
+}
+#mmeta .k { color: #e1251b; font-weight: 600; margin-right: 0.3vh; }
+#mmeta .name { color: #2f3033; font-weight: 600; }
+.lyric-box {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  min-height: 0;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-orient: vertical;
+  -webkit-flex-direction: column;
+  flex-direction: column;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: start;
+  -webkit-justify-content: flex-start;
+  justify-content: flex-start;
+  text-align: center;
+  padding-top: 2.4vh;
+  overflow: hidden;
+}
+.lyric {
+  font-size: 2.15vh;
+  color: #7b7d83;
+  line-height: 1.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  -webkit-transition: opacity .35s;
+  transition: opacity .35s;
+}
+.lyric.cur { color: #35363a; font-weight: 600; font-size: 2.3vh; }
+#mctrl {
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+  height: 6.4vh;
+  margin-top: 0.8vh;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  border-top: 0.14vh solid #eceef2;
+  padding-top: 0.6vh;
+}
+.cbtn {
+  width: 5.6vh; height: 5.6vh;
+  border: 0; background: transparent;
+  border-radius: 50%;
+  color: #4a4c52;
+  cursor: pointer;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  margin-right: 1.2vh;
+}
+.cbtn:active { background: #eceef2; }
+.cbtn svg { width: 3.4vh; height: 3.4vh; display: block; }
+#msrc {
+  margin-left: auto;
+  font-size: 1.95vh;
+  color: #6b6d72;
+  padding: 0.7vh 1.2vh;
+  border: 0.14vh solid #d8dade;
+  border-radius: 0.6vh;
+  cursor: pointer;
+  background: transparent;
+  font-family: inherit;
+}
+#msrc:active { background: #f0f1f4; }
+#msrc.on { border-color: #e1251b; color: #e1251b; }
+
+/* ======================= 地图区 ======================= */
+#mapwrap {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  position: relative;
+  border-radius: 1.1vh;
+  overflow: hidden;
+  background: #eaeef3;
+  box-shadow: 0 0.25vh 0.7vh rgba(20,25,40,.06);
+  min-width: 0;
+}
+#mapCanvas { display: block; width: 100%; height: 100%; }
+#amapBox { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+#navCard, #mapClock, #mapSpeed, #scalebar { z-index: 5; }
+/* 高德地图上的自车标记 */
+.carMark {
+  width: 2.6vh; height: 2.6vh;
+  border-radius: 50%;
+  background: #2f8fef;
+  border: 0.42vh solid #fff;
+  box-shadow: 0 0.3vh 0.8vh rgba(0,0,0,.35);
+}
+
+/* 转向指引卡 */
+#navCard {
+  position: absolute;
+  left: 1.2vh; top: 1.2vh;
+  background: rgba(24,26,30,.93);
+  color: #fff;
+  border-radius: 1vh;
+  padding: 1.1vh 1.4vh 1.1vh 1.1vh;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  box-shadow: 0 0.5vh 1.4vh rgba(0,0,0,.25);
+  max-width: 60%;
+}
+#navCard .turn {
+  width: 6.2vh; height: 6.2vh;
+  -webkit-flex-shrink: 0;
+  flex-shrink: 0;
+  margin-right: 1.1vh;
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+}
+#navCard .turn svg { width: 5.6vh; height: 5.6vh; display: block; }
+#navCard .txt { min-width: 0; }
+#navCard .dist {
+  font-size: 1.85vh; color: #b9c2cc; line-height: 1.2;
+  white-space: nowrap;
+}
+#navCard .road {
+  font-size: 3.1vh; font-weight: 700; line-height: 1.25;
+  white-space: nowrap; letter-spacing: 0.05vh;
+}
+#navCard .sub {
+  font-size: 1.85vh; color: #cfd6de; line-height: 1.35;
+  white-space: nowrap;
+  margin-top: 0.2vh;
+}
+#navCard .sub b { color: #fff; font-weight: 700; }
+#navCard .sub .arr { color: #4caf50; font-weight: 700; }
+
+/* 地图右上角时间胶囊 */
+#mapClock {
+  position: absolute;
+  right: 1.2vh; top: 1.2vh;
+  background: rgba(255,255,255,.95);
+  color: #2b2b2e;
+  font-size: 2vh;
+  font-weight: 700;
+  padding: 0.8vh 1.3vh;
+  border-radius: 0.8vh;
+  box-shadow: 0 0.2vh 0.6vh rgba(0,0,0,.12);
+  font-family: "DIN Alternate", Arial, sans-serif;
+}
+
+/* 地图右下角速度胶囊 */
+#mapSpeed {
+  position: absolute;
+  right: 1.2vh; bottom: 1.2vh;
+  background: rgba(255,255,255,.95);
+  border-radius: 0.8vh;
+  padding: 0.5vh 1.1vh;
+  text-align: center;
+  box-shadow: 0 0.2vh 0.6vh rgba(0,0,0,.12);
+  line-height: 1.1;
+}
+#mapSpeed .n {
+  font-size: 2.6vh; font-weight: 700; color: #2b2b2e;
+  font-family: "DIN Alternate", Arial, sans-serif;
+}
+#mapSpeed .l { font-size: 1.4vh; color: #9a9da4; }
+
+/* 地图左下角比例尺 */
+#scalebar {
+  position: absolute;
+  left: 1.2vh; bottom: 1.4vh;
+  font-size: 1.6vh;
+  color: #4a4c52;
+}
+#scalebar .bar {
+  height: 1.1vh;
+  width: 9vh;
+  border: 0.42vh solid #4a4c52;
+  border-top: 0;
+  margin-top: 0.3vh;
+}
+
+/* ======================= 设置面板 ======================= */
+#panelMask {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.35);
+  display: none;
+  z-index: 50;
+}
+#panelMask.show { display: block; }
+#panel {
+  position: absolute;
+  right: 1.2vh; top: 7.6vh;
+  width: 34vh;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 1.2vh;
+  padding: 1.6vh;
+  box-shadow: 0 1vh 3vh rgba(0,0,0,.22);
+  font-size: 2vh;
+  color: #35363a;
+}
+#panel h4 { font-size: 2.1vh; margin-bottom: 1.2vh; font-weight: 700; }
+#panel h4.sub {
+  margin-top: 1.4vh; padding-top: 1.4vh;
+  border-top: 0.24vh solid #eceef2;
+  color: #e1251b;
+}
+.prow {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  -webkit-box-align: center;
+  -webkit-align-items: center;
+  align-items: center;
+  -webkit-box-pack: justify;
+  -webkit-justify-content: space-between;
+  justify-content: space-between;
+  padding: 1vh 0;
+  border-top: 0.14vh solid #f0f1f4;
+}
+.prow:first-of-type { border-top: 0; }
+.prow.col {
+  display: block;
+  padding-bottom: 1.2vh;
+}
+.prow.col span { display: block; margin-bottom: 0.7vh; }
+.prow.col input {
+  width: 100%;
+  height: 4.6vh;
+  font-size: 1.9vh;
+  font-family: inherit;
+  padding: 0 1vh;
+  border: 0.16vh solid #d8dade;
+  border-radius: 0.7vh;
+  background: #f7f8fa;
+  color: #35363a;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.prow.col input:focus { border-color: #e1251b; background: #fff; }
+.seg {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  background: #f0f1f4;
+  border-radius: 0.7vh;
+  padding: 0.28vh;
+}
+.seg b {
+  display: block;
+  font-size: 1.85vh;
+  font-weight: 500;
+  color: #6b6d72;
+  padding: 0.85vh 1.5vh;
+  border-radius: 0.55vh;
+  cursor: pointer;
+}
+.seg b.on {
+  background: #fff;
+  color: #e1251b;
+  font-weight: 700;
+  box-shadow: 0 0.15vh 0.4vh rgba(0,0,0,.1);
+}
+.pbtns {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: flex;
+  margin-top: 1.4vh;
+}
+.pbtns button {
+  -webkit-box-flex: 1;
+  -webkit-flex: 1;
+  flex: 1;
+  height: 5vh;
+  font-size: 1.75vh;
+  font-family: inherit;
+  border: 0;
+  border-radius: 0.8vh;
+  background: #eceef2;
+  color: #4a4c52;
+  cursor: pointer;
+  margin-right: 0.8vh;
+  padding: 0;
+}
+.pbtns button:last-child { margin-right: 0; background: #e1251b; color: #fff; font-weight: 600; }
+.pbtns button:active { opacity: .82; }
+.sw {
+  width: 6.4vh; height: 3.2vh;
+  border-radius: 3.2vh;
+  background: #d8dade;
+  position: relative;
+  cursor: pointer;
+  -webkit-transition: background .2s;
+  transition: background .2s;
+}
+.sw i {
+  position: absolute;
+  top: 0.32vh; left: 0.32vh;
+  width: 2.56vh; height: 2.56vh;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0.15vh 0.3vh rgba(0,0,0,.2);
+  -webkit-transition: left .2s;
+  transition: left .2s;
+}
+.sw.on { background: #e1251b; }
+.sw.on i { left: 3.52vh; }
+#panel .pinfo { font-size: 1.75vh; color: #9a9da4; line-height: 1.5; margin-top: 1.2vh; }
+
+/* ======================= 提示气泡 ======================= */
+#toast {
+  position: absolute;
+  left: 50%; bottom: 12%;
+  -webkit-transform: translateX(-50%);
+  transform: translateX(-50%);
+  background: rgba(24,26,30,.9);
+  color: #fff;
+  font-size: 1.95vh;
+  padding: 1.1vh 2vh;
+  border-radius: 0.8vh;
+  opacity: 0;
+  -webkit-transition: opacity .25s;
+  transition: opacity .25s;
+  pointer-events: none;
+  z-index: 99;
+  max-width: 80%;
+  text-align: center;
+}
+#toast.show { opacity: 1; }
+
+/* ======================= 夜间模式 ======================= */
+body.night { background: #101216; color: #e6e8ec; }
+body.night .card { background: #1b1e24; box-shadow: none; }
+body.night #speed, body.night #weather, body.night #music { background: #1b1e24; }
+body.night .wval { color: #e6e8ec; }
+body.night .wval .u { color: #868a92; }
+body.night #date { color: #c9ccd3; }
+body.night #date .lunar { color: #7d818a; }
+body.night .top-item { color: #c9ccd3; }
+body.night .top-item.sel { background: #23262d; }
+body.night .rbtn { background: #1e2128; border-color: #33373f; color: #b6bac2; }
+body.night .rbtn:active { background: #2a2e36; }
+body.night .rbtn.dashed { background: transparent; border-color: #3a3e46; color: #6a6e76; }
+body.night #msrc { color: #b6bac2; border-color: #3a3e46; }
+body.night #mmeta { color: #a2a6ae; }
+body.night #mmeta .name { color: #e6e8ec; }
+body.night #mctrl { border-top-color: #2a2e36; }
+body.night .cbtn { color: #c9ccd3; }
+body.night .cbtn:active { background: #2a2e36; }
+body.night .lyric { color: #7d818a; }
+body.night .lyric.cur { color: #e6e8ec; }
+body.night #spdUnit { color: #6a6e76; }
+body.night #spdHint { color: #55595f; }
+body.night #panel { background: #1b1e24; color: #e6e8ec; }
+body.night #panel h4.sub { border-top-color: #2a2e36; }
+body.night .prow { border-top-color: #2a2e36; }
+body.night .prow.col input { background: #23262d; border-color: #3a3e46; color: #e6e8ec; }
+body.night .seg { background: #23262d; }
+body.night .seg b { color: #9aa0a8; }
+body.night .seg b.on { background: #333842; color: #ff6b5e; }
+body.night .pbtns button { background: #2a2e36; color: #c9ccd3; }
+body.night .pbtns button:last-child { background: #e1251b; color: #fff; }
+body.night #scalebar { color: #2b2f36; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===================== 顶部状态栏 ===================== -->
+  <div id="topbar">
+    <span id="clock">14:58</span>
+    <span id="date">2026年9月25日 星期五 <span class="lunar">八月十五</span></span>
+    <span class="spacer"></span>
+
+    <span class="top-item" id="conn"><i class="dot"></i>已连接 · 酷我音乐</span>
+    <span class="warn" id="warnBtn">▲</span>
+
+    <span class="top-item" id="splitBtn">分屏比例<i class="caret"></i></span>
+    <span class="top-item" id="setBtn">设置</span>
+    <span class="top-item sel" id="autoBtn">自动<i class="caret"></i></span>
+  </div>
+
+  <!-- ===================== 主体 ===================== -->
+  <div id="main">
+
+    <!-- 左侧圆形按钮条 -->
+    <div id="rail">
+      <div class="rbtn dashed" data-tip="添加快捷方式">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="vol-up" data-tip="音量 +">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="vol-down" data-tip="音量 −">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M5 12h14"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="search" data-tip="搜索地点">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="6.5"/>
+          <path d="M16 16l4.5 4.5"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="locate" data-tip="回到当前位置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="6"/>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="media" data-tip="打开音乐">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 15v-4a8 8 0 0 1 16 0v4"/>
+          <path d="M4 15h2.5v4H5.5A1.5 1.5 0 0 1 4 17.5V15zM20 15h-2.5v4h1A1.5 1.5 0 0 0 20 17.5V15z"/>
+        </svg>
+      </div>
+      <div class="rbtn" data-act="settings" data-tip="系统设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15a1.6 1.6 0 0 0-1.5-1H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 7 2.6 1.6 1.6 0 0 0 8 1.1V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 19.4 7v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" transform="scale(0.92) translate(1,1)"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- 左列：速度 / 天气 / 音乐 -->
+    <div id="left">
+
+      <div class="card" id="speed">
+        <div id="spdNum">0</div>
+        <div id="spdUnit">km/h</div>
+        <button id="navBtn">导航</button>
+        <div id="spdHint">点击数字演示巡航</div>
+      </div>
+
+      <div class="card" id="weather">
+        <div class="witem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#f2a900" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="4.2"/>
+            <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/>
+          </svg>
+          <span class="wval"><span id="wTemp">32</span><span class="u">℃</span></span>
+        </div>
+        <div class="witem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#3d9be9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.2s5.6 6.1 5.6 9.6A5.6 5.6 0 0 1 12 18.4a5.6 5.6 0 0 1-5.6-5.6C6.4 9.3 12 3.2 12 3.2z"/>
+          </svg>
+          <span class="wval"><span id="wHum">57</span><span class="u">%</span></span>
+        </div>
+        <div class="witem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#6f737a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 4.5L20 19H4z"/>
+          </svg>
+          <span class="wval"><span id="wAlt">33</span><span class="u">m</span></span>
+        </div>
+        <div class="witem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#e1251b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.2"/>
+            <path d="M12 3.8l2.6 4.4-2.6 1.6-2.6-1.6z" fill="#e1251b" stroke="none"/>
+            <path d="M12 6.5v11"/>
+          </svg>
+          <span class="wval dir" id="wDir">西北29</span>
+        </div>
+      </div>
+
+      <div class="card" id="music">
+        <div id="mtitle">2002年的第一场雪 - 刀郎</div>
+        <div id="mmeta">
+          <span class="k">词：</span><span class="name">刀郎</span>
+          <span style="display:inline-block;width:1.2vh;"></span>
+          <span class="tag">曲</span><span class="name">刀郎</span>
+        </div>
+        <div class="lyric-box">
+          <div class="lyric" id="lyric1">2002 年的第一场雪</div>
+          <div class="lyric cur" id="lyric2">比以往时候来得更晚一些</div>
+        </div>
+        <div id="mctrl">
+          <button class="cbtn" data-act="prev" data-tip="上一首">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2.4v14H7zM19 5v14L9.6 12z"/></svg>
+          </button>
+          <button class="cbtn" data-act="play" data-tip="播放 / 暂停">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8l12 7.2-12 7.2z"/></svg>
+          </button>
+          <button class="cbtn" data-act="stop" data-tip="停止">
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.6" y="6.6" width="10.8" height="10.8" rx="1.2"/></svg>
+          </button>
+          <button class="cbtn" data-act="next" data-tip="下一首">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.6 5H17v14h-2.4zM5 5l9.4 7L5 19z"/></svg>
+          </button>
+          <button id="msrc">本地</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 右侧地图 -->
+    <div id="mapwrap">
+      <canvas id="mapCanvas"></canvas>
+      <div id="amapBox"></div>
+
+      <div id="navCard">
+        <div class="turn">
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M33 40V22a8 8 0 0 0-8-8H17" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 7L9 14l13 7z" fill="#ffffff"/>
+          </svg>
+        </div>
+        <div class="txt">
+          <div class="dist">70米进入</div>
+          <div class="road">永富街</div>
+          <div class="sub"><b>2.2公里 · 6分钟</b>&nbsp;&nbsp;<span class="arr">15:03到</span></div>
+        </div>
+      </div>
+
+      <div id="mapClock">14:58</div>
+      <div id="mapSpeed"><div class="n" id="mapSpdN">29</div><div class="l">km/h</div></div>
+      <div id="scalebar"><div>200 m</div><div class="bar"></div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 设置面板 -->
+<div id="panelMask">
+  <div id="panel">
+    <h4>桌面设置</h4>
+    <div class="prow"><span>夜间模式</span><div class="sw" id="swNight"><i></i></div></div>
+    <div class="prow"><span>开机自启</span><div class="sw on" id="swBoot"><i></i></div></div>
+    <div class="prow"><span>左侧按钮条</span><div class="sw on" id="swRail"><i></i></div></div>
+    <div class="prow"><span>转向播报</span><div class="sw on" id="swVoice"><i></i></div></div>
+
+    <h4 class="sub">地图</h4>
+    <div class="prow">
+      <span>地图源</span>
+      <div class="seg" id="segSrc">
+        <b class="on" data-v="demo">示意地图</b><b data-v="amap">高德 JS</b>
+      </div>
+    </div>
+    <div class="prow col">
+      <span>高德 Key（Web端 JS API）</span>
+      <input id="amapKey" type="text" placeholder="粘贴你自己的 key 后点保存" autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="prow"><span>转向指引卡</span><div class="sw on" id="swNav"><i></i></div></div>
+    <div class="prow"><span>时间胶囊</span><div class="sw on" id="swClk"><i></i></div></div>
+    <div class="prow"><span>比例尺</span><div class="sw on" id="swScale"><i></i></div></div>
+    <div class="prow"><span>路线线</span><div class="sw on" id="swTraffic"><i></i></div></div>
+
+    <div class="pinfo" id="pinfo">
+      分屏比例：<span id="pSplit">左 34% / 图 66%</span><br>
+      高德 key 需选「Web端(JS API)」并取消域名白名单，否则会报
+      INVALID_USER_DOMAIN；key 为空或加载失败会自动回退示意地图。
+    </div>
+    <div class="pbtns">
+      <button id="btnSys">系统设置</button>
+      <button id="btnClose">关闭</button>
+      <button id="btnSave">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================================
+   车机桌面脚本 · ES5 写法（兼容 Android 4.4 老 WebView）
+   ========================================================================= */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var body = document.body;
+
+  /* -------------------- 工具：提示气泡 -------------------- */
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.innerHTML = msg;
+    t.className = 'show';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.className = ''; }, 1600);
+  }
+
+  /* -------------------- 工具：安卓桥 [BRIDGE] --------------------
+     打包成 APK 时，安卓侧加一个 JavascriptInterface：
+       webView.addJavascriptInterface(new CarBridge(), "CarBridge");
+     里面提供 media(action) / setVolume(step) / openApp(pkg) / getSpeed() 等方法。
+     浏览器里跑的时候 CarBridge 不存在，就只弹提示，不影响界面。
+     ------------------------------------------------------------ */
+  var hasBridge = function () {
+    return (typeof window.CarBridge !== 'undefined' && window.CarBridge !== null);
+  };
+  function bridge(fn, arg, fbMsg) {
+    if (hasBridge() && typeof window.CarBridge[fn] === 'function') {
+      try { window.CarBridge[fn](arg); return; } catch (e) {}
+    }
+    toast(fbMsg || '待安卓侧接入');
+  }
+
+  /* =========================== 1. 时钟 =========================== */
+  var WEEK = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function tick() {
+    var d = new Date();
+    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    $('clock').innerHTML = hm;
+    $('mapClock').innerHTML = hm;
+    // 农历：先写死，接真实农历请引入 lunar 库后替换此处
+    $('date').innerHTML = d.getFullYear() + '年<span class="red">' + (d.getMonth() + 1) + '月</span>'
+      + d.getDate() + '日 ' + WEEK[d.getDay()] + ' <span class="lunar">八月十五</span>';
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  /* ====================== 2. 速度（演示 / GPS） ======================
+     真机接法：安卓侧 GPS 每秒回调 window.onGpsSpeed(kmh)，
+     这里优先用真值，拿不到就演示值。
+     ================================================================= */
+  var speed = 0, cruising = false, speedTimer = null;
+  function setSpeed(v) {
+    speed = v | 0;
+    $('spdNum').innerHTML = speed;
+    $('mapSpdN').innerHTML = speed;
+  }
+  window.onGpsSpeed = function (kmh) {           // [BRIDGE] 安卓侧调这个
+    cruising = false;
+    if (speedTimer) { clearInterval(speedTimer); speedTimer = null; }
+    $('navBtn').className = 'on';
+    setSpeed(kmh);
+  };
+  $('spdNum').onclick = function () {
+    if (cruising) {
+      cruising = false;
+      if (speedTimer) { clearInterval(speedTimer); speedTimer = null; }
+      setSpeed(0);
+      $('navBtn').className = '';
+      $('spdHint').innerHTML = '点击数字演示巡航';
+      toast('已停止演示');
+    } else {
+      cruising = true;
+      $('navBtn').className = 'on';
+      $('spdHint').innerHTML = '演示中，再点数字停止';
+      toast('模拟巡航中…');
+      speedTimer = setInterval(function () {
+        var base = 46;
+        setSpeed(base + Math.round(Math.random() * 22));
+      }, 900);
+    }
+  };
+  $('navBtn').onclick = function () {
+    bridge('openApp', 'com.autonavi.amapautp', '导航：待接入高德车机版');
+  };
+
+  /* =========================== 3. 天气 [WEATHER] ===========================
+     接真实数据：
+       fetch('https://devapi.qweather.com/v7/weather/now?location=101010100&key=KEY')
+         .then(r => r.json()).then(function(j){
+            $('wTemp').innerHTML = j.now.temp;
+            $('wHum').innerHTML  = j.now.humidity;
+            $('wDir').innerHTML  = j.now.windDir + j.now.windScale;
+         });
+     老内核没有 fetch，用 XMLHttpRequest；跨域请让安卓侧转发。
+     ====================================================================== */
+  function refreshWeather() {
+    // 演示：在基准值上下轻微抖动，证明界面是"活的"
+    var t = 32, h = 57, a = 33, d = '西北', s = 29;
+    if (cruising) {
+      t += Math.round(Math.random() * 2) - 1;
+      h += Math.round(Math.random() * 4) - 2;
+      a += Math.round(Math.random() * 6) - 3;
+    }
+    $('wTemp').innerHTML = t;
+    $('wHum').innerHTML = h;
+    $('wAlt').innerHTML = a;
+    $('wDir').innerHTML = d + s;
+  }
+  refreshWeather();
+  setInterval(refreshWeather, 30000);
+
+  /* =========================== 4. 歌词轮播 =========================== */
+  var lyrics = [
+    '2002 年的第一场雪', '比以往时候来得更晚一些',
+    '停靠在八楼的二路汽车', '带走了最后一片飘落的黄叶',
+    '2002 年的第一场雪', '是留在乌鲁木齐难舍的情结',
+    '你像一只飞来飞去的蝴蝶', '在白雪飘飞的季节里摇曳'
+  ];
+  var li = 0;
+  setInterval(function () {
+    li = (li + 1) % lyrics.length;
+    var nxt = (li + 1) % lyrics.length;
+    var a = $('lyric1'), b = $('lyric2');
+    a.className = 'lyric';
+    b.className = 'lyric';
+    a.innerHTML = lyrics[nxt];
+    b.innerHTML = lyrics[li];
+    b.className = 'lyric cur';
+  }, 4200);
+
+  /* =========================== 5. 顶部按钮 =========================== */
+  $('warnBtn').onclick = function () { toast('暂无告警'); };
+
+  var splitRatios = [34, 40, 46, 30];
+  var splitIdx = 0;
+  function applySplit(r) {
+    $('left').style.width = r + '%';
+    $('pSplit').innerHTML = '左 ' + r + '% / 图 ' + (100 - r) + '%';
+    setTimeout(drawMap, 320);          // 动画结束后按新宽度重画地图
+    if (amapObj) { setTimeout(function () { amapObj.resize(); }, 340); }
+  }
+  $('splitBtn').onclick = function () {
+    splitIdx = (splitIdx + 1) % splitRatios.length;
+    cfg.split = splitRatios[splitIdx];
+    applySplit(cfg.split);
+    saveCfg();
+    toast('分屏比例：左 ' + cfg.split + '% / 图 ' + (100 - cfg.split) + '%');
+  };
+
+  var auto = true;
+  $('autoBtn').onclick = function () {
+    auto = !auto;
+    $('autoBtn').innerHTML = (auto ? '自动' : '手动') + '<i class="caret"></i>';
+    toast(auto ? '已切换为自动模式' : '已切换为手动模式');
+  };
+
+  /* =========================== 6. 配置持久化 ===========================
+     [BRIDGE] 在 APK 里由 CarBridge.getPref / setPref 存进 SharedPreferences；
+     在浏览器里退化成 localStorage。同一套字段两边都能跑。
+     安卓侧的 BootReceiver 也是读同一份 "cardesk_cfg" JSON 来决定开不开机自启。
+     ==================================================================== */
+  var CFG_KEY = 'cardesk_cfg';
+  var cfg = {
+    night: false, boot: true, rail: true, voice: true,
+    split: 34, mapSrc: 'demo', amapKey: '',
+    lNav: true, lClk: true, lScale: true, lTraffic: true
+  };
+  function prefGet(k) {
+    if (hasBridge() && typeof window.CarBridge.getPref === 'function') {
+      try { return window.CarBridge.getPref(k) || ''; } catch (e) { return ''; }
+    }
+    try { return window.localStorage.getItem(k) || ''; } catch (e) { return ''; }
+  }
+  function prefSet(k, v) {
+    if (hasBridge() && typeof window.CarBridge.setPref === 'function') {
+      try { window.CarBridge.setPref(k, '' + v); return; } catch (e) {}
+    }
+    try { window.localStorage.setItem(k, '' + v); } catch (e) {}
+  }
+  function loadCfg() {
+    var s = prefGet(CFG_KEY);
+    if (!s) return;
+    try {
+      var o = JSON.parse(s);
+      for (var k in o) { if (cfg.hasOwnProperty(k)) cfg[k] = o[k]; }
+    } catch (e) {}
+  }
+  function saveCfg() { prefSet(CFG_KEY, JSON.stringify(cfg)); }
+  loadCfg();
+
+  /* =========================== 7. 设置面板 =========================== */
+  function openPanel() {
+    $('amapKey').value = cfg.amapKey;
+    $('panelMask').className = 'show';
+  }
+  function closePanel() { $('panelMask').className = ''; }
+  $('setBtn').onclick = openPanel;
+  $('btnClose').onclick = closePanel;
+  // 逃生通道：万一设成了默认桌面又想把主屏改回去，从这里进系统设置
+  $('btnSys').onclick = function () {
+    bridge('openApp', 'com.android.settings', '打开系统设置：待安卓侧接入');
+  };
+  $('panelMask').onclick = function (e) {
+    if (e.target === $('panelMask')) closePanel();
+  };
+
+  function setSw(id, on) { $(id).className = on ? 'sw on' : 'sw'; }
+  function bindSw(id, key, onChange) {
+    $(id).onclick = function () {
+      cfg[key] = !cfg[key];
+      this.className = cfg[key] ? 'sw on' : 'sw';
+      if (onChange) onChange(cfg[key]);
+    };
+  }
+  bindSw('swNight', 'night', function (on) {
+    body.className = on ? 'night' : '';
+    if (amapObj && amapObj.setMapStyle) {                 // 高德跟着换深色底图
+      amapObj.setMapStyle(on ? 'amap://styles/dark' : 'amap://styles/whitesmoke');
+    }
+    setTimeout(drawMap, 60);
+  });
+  bindSw('swBoot', 'boot');
+  bindSw('swRail', 'rail', function (on) {
+    $('rail').style.display = on ? 'flex' : 'none';
+    setTimeout(drawMap, 60);
+  });
+  bindSw('swVoice', 'voice');
+  bindSw('swNav', 'lNav', function (on) { $('navCard').style.display = on ? 'flex' : 'none'; });
+  bindSw('swClk', 'lClk', function (on) { $('mapClock').style.display = on ? 'block' : 'none'; });
+  bindSw('swScale', 'lScale', function (on) { $('scalebar').style.display = on ? 'block' : 'none'; });
+  bindSw('swTraffic', 'lTraffic', function () { drawMap(); });
+
+  var segItems = $('segSrc').getElementsByTagName('b');
+  for (var sg = 0; sg < segItems.length; sg++) {
+    segItems[sg].onclick = function () {
+      cfg.mapSrc = this.getAttribute('data-v');
+      for (var m = 0; m < segItems.length; m++) { segItems[m].className = ''; }
+      this.className = 'on';
+    };
+  }
+
+  $('btnSave').onclick = function () {
+    cfg.amapKey = ($('amapKey').value || '').replace(/^\s+|\s+$/g, '');
+    cfg.amapKey = cfg.amapKey.replace(/[^\x21-\x7e]/g, '');   // 去掉粘贴带进来的空格/中文
+    saveCfg();
+    applyCfg();
+    applyMapSource();
+    closePanel();
+    toast('设置已保存');
+  };
+
+  function applyCfg() {
+    body.className = cfg.night ? 'night' : '';
+    $('rail').style.display = cfg.rail ? 'flex' : 'none';
+    $('left').style.width = cfg.split + '%';
+    $('pSplit').innerHTML = '左 ' + cfg.split + '% / 图 ' + (100 - cfg.split) + '%';
+    setSw('swNight', cfg.night);  setSw('swBoot', cfg.boot);
+    setSw('swRail', cfg.rail);    setSw('swVoice', cfg.voice);
+    setSw('swNav', cfg.lNav);     setSw('swClk', cfg.lClk);
+    setSw('swScale', cfg.lScale); setSw('swTraffic', cfg.lTraffic);
+    $('navCard').style.display = cfg.lNav ? 'flex' : 'none';
+    $('mapClock').style.display = cfg.lClk ? 'block' : 'none';
+    $('scalebar').style.display = cfg.lScale ? 'block' : 'none';
+    for (var m = 0; m < segItems.length; m++) {
+      segItems[m].className = segItems[m].getAttribute('data-v') === cfg.mapSrc ? 'on' : '';
+    }
+    setTimeout(drawMap, 60);
+  }
+
+  /* =========================== 7. 左侧 & 播放按钮 =========================== */
+  var railBtns = document.querySelectorAll('.rbtn');
+  for (var i = 0; i < railBtns.length; i++) {
+    railBtns[i].onclick = (function (el) {
+      return function () {
+        var act = el.getAttribute('data-act');
+        var tip = el.getAttribute('data-tip') || '';
+        if (act === 'vol-up' || act === 'vol-down') {
+          bridge('setVolume', act === 'vol-up' ? 1 : -1, tip + '（待安卓侧接入）');
+        } else if (act === 'search') {
+          bridge('openApp', 'com.autonavi.amapautp', '搜索：待接入高德车机版');
+        } else if (act === 'locate') {
+          recenter();
+          toast('已回到当前位置');
+        } else if (act === 'media') {
+          bridge('openApp', 'cn.kuwo.player', '打开音乐：待安卓侧接入');
+        } else if (act === 'settings') {
+          openPanel();
+        } else {
+          toast(tip + '：待配置');
+        }
+      };
+    })(railBtns[i]);
+  }
+
+  var cbtns = document.querySelectorAll('.cbtn');
+  for (var j = 0; j < cbtns.length; j++) {
+    cbtns[j].onclick = (function (el) {
+      return function () {
+        var act = el.getAttribute('data-act');
+        var label = act === 'prev' ? '上一首' : act === 'play' ? '播放 / 暂停'
+                  : act === 'stop' ? '停止' : '下一首';
+        bridge('media', act, label + '：待接入酷我音乐');
+      };
+    })(cbtns[j]);
+  }
+  $('msrc').onclick = function () {
+    var local = this.className.indexOf('on') < 0;
+    this.className = local ? 'on' : '';
+    this.innerHTML = local ? '本地' : '在线';
+    toast(local ? '音源：本地' : '音源：在线');
+  };
+
+  /* =========================================================================
+     8. 地图 [AMAP]
+     -------------------------------------------------------------------------
+     默认用 Canvas 画一张"示意地图"，零依赖、零流量、老内核也流畅。
+     想换成真正的高德地图（需要联网 + key）：
+       1) 在 </body> 前引入：
+          <script src="https://webapi.amap.com/maps?v=2.0&key=你的KEY"><\/script>
+       2) 把 initMap() 换成：
+          var map = new AMap.Map('mapwrap', {zoom: 16, center: [116.397, 39.909]});
+          map.setMapStyle('amap://styles/normal');
+       注意：高德 JS API 2.0 需要 Chrome 60+ 内核，老车机建议用 1.4 版本。
+     ========================================================================= */
+  var cv = $('mapCanvas');
+  var ctx = cv.getContext('2d');
+  var W = 0, H = 0, dpr = 1;
+  var cam = { x: 0, y: 0 };           // 车辆在路线上的位置 0~1
+  var dir = 1;
+  var mapMode = 'demo';               // demo = Canvas 示意地图 / amap = 真高德
+  var amapObj = null, amapLoading = false, amapMarker = null;
+
+  /* --- 高德 JS API 1.4（老 WebView 稳妥版） --- */
+  var AMAP_ROUTE = [
+    [113.1130, 23.0310], [113.1180, 23.0290], [113.1230, 23.0265],
+    [113.1290, 23.0240], [113.1350, 23.0205], [113.1410, 23.0165]
+  ];
+  function setMapMode(m) {
+    mapMode = m;
+    cv.style.display = m === 'demo' ? 'block' : 'none';
+    $('amapBox').style.display = m === 'amap' ? 'block' : 'none';
+    if (m === 'demo') { resizeMap(); drawMap(); }
+  }
+  function loadAMap(cb) {
+    if (amapLoading) return;
+    amapLoading = true;
+    var sc = document.createElement('script');
+    sc.src = 'https://webapi.amap.com/maps?v=1.4.15&key=' + encodeURIComponent(cfg.amapKey);
+    sc.onload = function () { amapLoading = false; cb(!!window.AMap); };
+    sc.onerror = function () { amapLoading = false; cb(false); };
+    document.body.appendChild(sc);
+  }
+  function initAMap() {
+    if (amapObj) { amapObj.resize(); setMapMode('amap'); return; }
+    try {
+      amapObj = new AMap.Map('amapBox', {
+        zoom: 16,
+        center: AMAP_ROUTE[2],
+        resizeEnable: true,
+        mapStyle: cfg.night ? 'amap://styles/dark' : 'amap://styles/whitesmoke'
+      });
+      new AMap.Polyline({
+        path: AMAP_ROUTE, strokeColor: '#33a852', strokeWeight: 8,
+        strokeOpacity: 0.95, lineJoin: 'round', showDir: true
+      }).setMap(amapObj);
+      amapMarker = new AMap.Marker({
+        position: AMAP_ROUTE[2],
+        content: '<div class="carMark"></div>',
+        offset: new AMap.Pixel(-13, -13)
+      });
+      amapMarker.setMap(amapObj);
+      setMapMode('amap');
+      toast('高德地图已加载');
+    } catch (e) {
+      toast('高德初始化失败，已回退示意地图');
+      setMapMode('demo');
+    }
+  }
+  function applyMapSource() {
+    if (cfg.mapSrc === 'amap' && cfg.amapKey) {
+      if (window.AMap) { initAMap(); return; }
+      toast('正在加载高德地图…');
+      loadAMap(function (ok) {
+        if (ok) { initAMap(); }
+        else {
+          toast('高德加载失败（key 或网络问题），已回退示意地图');
+          cfg.mapSrc = 'demo';
+          applyCfg();
+          setMapMode('demo');
+        }
+      });
+    } else {
+      setMapMode('demo');
+    }
+  }
+
+  // 路线折线（相对坐标 0~1，在 resize 时映射到画布）
+  var route = [
+    [0.08, 0.96], [0.22, 0.86], [0.30, 0.74], [0.38, 0.68],
+    [0.50, 0.62], [0.62, 0.54], [0.70, 0.44], [0.76, 0.32], [0.86, 0.22], [0.98, 0.10]
+  ];
+
+  function resizeMap() {
+    W = cv.clientWidth;
+    H = cv.clientHeight;
+    if (!W || !H) return;
+    dpr = window.devicePixelRatio || 1;
+    if (dpr > 1.5) dpr = 1;                 // 老车机像素低，避免画布过大卡顿
+    cv.width = W * dpr;
+    cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // 简易伪随机（每次刷新保持一致的地图）
+  function rnd(seed) {
+    var x = Math.sin(seed * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function P(p) { return [p[0] * W, p[1] * H]; }
+
+  function drawMap() {
+    if (!W) return;
+    var i, k;
+    var s = Math.min(W, H) / 420;            // 尺寸缩放系数
+    if (s < 0.75) s = 0.75;
+    if (s > 2.4) s = 2.4;
+
+    /* --- 底图（随夜间模式换色）--- */
+    var night = body.className.indexOf('night') >= 0;
+    var C = night
+      ? { bg: '#14171c', bA: '#181c22', bB: '#1b2026', edge: '#2a2f38', core: '#4a4530',
+          minor: '#22262d', label: '#6b7079', poiBg: '#23272f', poiBd: '#333841' }
+      : { bg: '#eef1f5', bA: '#e6e9ef', bB: '#e3ebdc', edge: '#ffffff', core: '#f7e6b8',
+          minor: '#ffffff', label: '#8a8f98', poiBg: '#ffffff', poiBd: '#c2c7ce' };
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 街区色块 */
+    for (i = 0; i < 26; i++) {
+      var bx = rnd(i + 1) * W, by = rnd(i + 40) * H;
+      var bw = (0.05 + rnd(i + 80) * 0.09) * W;
+      var bh = (0.05 + rnd(i + 120) * 0.09) * H;
+      ctx.fillStyle = rnd(i + 160) > 0.72 ? C.bB : C.bA;
+      ctx.fillRect(bx, by, bw, bh);
+    }
+
+    /* --- 道路网：横竖主干道 --- */
+    ctx.lineCap = 'round';
+    var roads = [];
+    for (i = 1; i <= 5; i++) { roads.push({ v: true, p: i / 6 + (rnd(i) - 0.5) * 0.02 }); }
+    for (i = 1; i <= 4; i++) { roads.push({ v: false, p: i / 5 + (rnd(i + 9) - 0.5) * 0.02 }); }
+
+    // 主路白色宽描边 + 浅黄内芯
+    for (k = 0; k < 2; k++) {
+      ctx.strokeStyle = k === 0 ? C.edge : C.core;
+      ctx.lineWidth = (k === 0 ? 26 : 18) * s;
+      for (i = 0; i < roads.length; i++) {
+        var r = roads[i];
+        ctx.beginPath();
+        if (r.v) { ctx.moveTo(r.p * W, -20); ctx.lineTo(r.p * W + 40 * s, H + 20); }
+        else { ctx.moveTo(-20, r.p * H); ctx.lineTo(W + 20, r.p * H - 30 * s); }
+        ctx.stroke();
+      }
+    }
+    // 次路
+    ctx.strokeStyle = C.minor;
+    ctx.lineWidth = 5 * s;
+    for (i = 0; i < 14; i++) {
+      ctx.beginPath();
+      if (i % 2) { ctx.moveTo(rnd(i + 200) * W, 0); ctx.lineTo(rnd(i + 210) * W, H); }
+      else { ctx.moveTo(0, rnd(i + 220) * H); ctx.lineTo(W, rnd(i + 230) * H); }
+      ctx.stroke();
+    }
+
+    /* --- 导航路线：白色外描边 + 绿色线芯（可在设置里关掉）--- */
+    function pathRoute() {
+      ctx.beginPath();
+      for (i = 0; i < route.length; i++) {
+        var pp = P(route[i]);
+        if (i === 0) ctx.moveTo(pp[0], pp[1]); else ctx.lineTo(pp[0], pp[1]);
+      }
+    }
+    if (cfg.lTraffic) {
+      pathRoute();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 15 * s; ctx.lineJoin = 'round'; ctx.stroke();
+      pathRoute();
+      ctx.strokeStyle = '#33a852'; ctx.lineWidth = 9 * s; ctx.stroke();
+    }
+
+    /* --- 路名 --- */
+    ctx.fillStyle = C.label;
+    ctx.font = Math.round(11 * s) + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('永富街', W * 0.42, H * 0.30);
+    ctx.fillText('佛山大道', W * 0.10, H * 0.52);
+    ctx.fillText('季华路', W * 0.62, H * 0.78);
+    ctx.fillText('祖庙路', W * 0.80, H * 0.56);
+
+    /* --- POI 小标记 --- */
+    var pois = [[0.30, 0.30, '加油站'], [0.58, 0.34, '停车场'], [0.72, 0.66, '便利店']];
+    ctx.font = Math.round(10 * s) + 'px "Microsoft YaHei", sans-serif';
+    for (i = 0; i < pois.length; i++) {
+      var px = pois[i][0] * W, py = pois[i][1] * H;
+      ctx.fillStyle = C.poiBg;
+      ctx.beginPath(); ctx.arc(px, py, 5 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = C.poiBd; ctx.lineWidth = 1.5 * s; ctx.stroke();
+      ctx.fillStyle = C.label;
+      ctx.fillText(pois[i][2], px + 8 * s, py + 4 * s);
+    }
+
+    /* --- 车标：位置 + 朝向 --- */
+    var seg = cam.x * (route.length - 1);
+    var si = Math.floor(seg);
+    if (si > route.length - 2) si = route.length - 2;
+    var t = seg - si;
+    var a = P(route[si]), b = P(route[si + 1]);
+    var cx = a[0] + (b[0] - a[0]) * t;
+    var cy = a[1] + (b[1] - a[1]) * t;
+    var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+
+    // 视野光圈
+    var g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 90 * s);
+    g.addColorStop(0, 'rgba(61,155,233,.22)');
+    g.addColorStop(1, 'rgba(61,155,233,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, 90 * s, 0, Math.PI * 2); ctx.fill();
+
+    // 箭头
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(17 * s, 0);
+    ctx.lineTo(-11 * s, 11 * s);
+    ctx.lineTo(-6 * s, 0);
+    ctx.lineTo(-11 * s, -11 * s);
+    ctx.closePath();
+    ctx.fillStyle = '#2f8fef';
+    ctx.fill();
+    ctx.lineWidth = 2.4 * s;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.restore();
+
+    /* --- 起终点（跟随路线开关）--- */
+    if (cfg.lTraffic) {
+      var st = P(route[0]);
+      ctx.fillStyle = '#3fbf5a';
+      ctx.beginPath(); ctx.arc(st[0], st[1], 6 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 * s; ctx.stroke();
+      var ed = P(route[route.length - 1]);
+      ctx.fillStyle = '#e1251b';
+      ctx.beginPath(); ctx.arc(ed[0], ed[1], 6 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.stroke();
+    }
+  }
+
+  function recenter() { cam.x = 0.42; }
+
+  /* 车辆沿路线缓慢行进（演示"在干活"） */
+  function loop() {
+    cam.x += 0.00035 * dir;
+    if (cam.x > 1) { cam.x = 1; dir = -1; }
+    if (cam.x < 0) { cam.x = 0; dir = 1; }
+    if (mapMode === 'demo') { drawMap(); }
+    else if (amapMarker) {
+      // 高德模式下把自车标记按同一进度挪位置
+      var seg = cam.x * (AMAP_ROUTE.length - 1);
+      var si = Math.floor(seg);
+      if (si > AMAP_ROUTE.length - 2) { si = AMAP_ROUTE.length - 2; }
+      var t = seg - si;
+      var a = AMAP_ROUTE[si], b = AMAP_ROUTE[si + 1];
+      amapMarker.setPosition([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+    setTimeout(loop, 60);
+  }
+
+  function onResize() {
+    resizeMap();
+    drawMap();
+    if (amapObj) { amapObj.resize(); }
+  }
+  window.onresize = onResize;
+  recenter();
+  setTimeout(function () {
+    applyCfg();
+    resizeMap();
+    drawMap();
+    loop();
+    applyMapSource();
+  }, 60);
+
+  /* -------------------- 首屏提示 -------------------- */
+  setTimeout(function () { toast('车机桌面已就绪 · 点击左列数字可演示巡航'); }, 700);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Gradle / Android 构建产物
+.gradle/
+build/
+app/build/
+captures/
+*.iml
+.idea/
+local.properties
+.externalNativeBuild/
+.cxx/
+
+# 构建时由根目录 index.html 自动复制生成，不入库（唯一源是根目录那份）
+app/src/main/assets/index.html
+
+# 签名文件永远不要进仓库（keystore 走 CI Secrets）
+*.jks
+*.keystore
+release.keystore
+
+# 产物
+*.apk
+*.aab
+release-assets/

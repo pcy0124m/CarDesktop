@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用图标：矢量绘制，深底 + 红色仪表盘 + 指针。
+  用 vector 而不是多套 mipmap PNG —— 车机各种屏幕密度都能自动缩放，仓库里也不用塞一堆位图。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <!-- 深色底 -->
+    <path
+        android:fillColor="#12151A"
+        android:pathData="M0,0h96v96H0z" />
+
+    <!-- 仪表盘外圈（红色弧） -->
+    <path
+        android:pathData="M22,60A26,26 0 1 1 74,60"
+        android:strokeColor="#E1251B"
+        android:strokeWidth="7"
+        android:strokeLineCap="round" />
+
+    <!-- 指针 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,52L70,32L54,56z" />
+
+    <!-- 底部刻度线（蓝色，像道路） -->
+    <path
+        android:pathData="M32,68h32"
+        android:strokeColor="#4A9BE9"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+</vector>
