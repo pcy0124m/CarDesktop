@@ -9,6 +9,8 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.webkit.JavascriptInterface
 import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 暴露给网页的桥接对象（网页里叫 window.CarBridge）。
@@ -17,6 +19,8 @@ import android.widget.Toast
  *   getPref / setPref  —— 设置持久化（SharedPreferences）
  *   media / setVolume  —— 媒体上一首/播放/停止/下一首、音量加减
  *   openApp / hasApp   —— 按包名拉起别的 App、探测某个包装没装
+ *   listApps           —— 枚举车机上所有可启动的 App（应用选择器数据源）
+ *   mapWindow          —— 魔改高德悬浮地图广播
  *   toast              —— 原生 Toast（网页的提示气泡在车机上太小，重要提示走这里）
  *
  * 注意：所有 @JavascriptInterface 方法都在 WebView 的 JS 线程被调用，
@@ -97,6 +101,49 @@ class CarBridge(private val act: Activity) {
             act.applicationContext.packageManager.getLaunchIntentForPackage(pkg) != null
         } catch (e: Exception) {
             false
+        }
+    }
+
+    // ------------------------------------------------ 应用选择器（从已装应用里挑地图）
+    /**
+     * 枚举车机上所有「有启动入口」的 App，给设置面板的应用选择器用。
+     * 返回 JSON 数组字符串：[{"p":"包名","l":"应用名"},...]，按应用名排好序。
+     *
+     * 只列带 LAUNCHER 入口的（点得开的），排除自己；系统服务类没有入口的自然被过滤掉。
+     * targetSdk 30+ 需要 QUERY_ALL_PACKAGES / <queries> 权限，Manifest 已声明。
+     *
+     * 注意：本方法跑在 WebView 的 JavaBridge 线程（不是主线程），扫包再慢也不卡界面，
+     * 网页端拿到字符串后自行 JSON.parse。
+     */
+    @JavascriptInterface
+    fun listApps(): String {
+        return try {
+            val ctx = act.applicationContext
+            val pm = ctx.packageManager
+            val self = ctx.packageName
+            val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val ris = pm.queryIntentActivities(query, 0)
+            val seen = HashSet<String>()
+            val pairs = ArrayList<Pair<String, String>>()
+            for (ri in ris) {
+                val pkg = ri.activityInfo.packageName ?: continue
+                if (pkg == self || pkg.isBlank() || !seen.add(pkg)) continue
+                val label = try { ri.loadLabel(pm).toString().trim() } catch (e: Exception) { "" }
+                if (label.isEmpty()) continue
+                pairs.add(Pair(pkg, label))
+            }
+            val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+            pairs.sortWith { a, b -> collator.compare(a.second, b.second) }
+            val arr = JSONArray()
+            for (p in pairs) {
+                val o = JSONObject()
+                o.put("p", p.first)
+                o.put("l", p.second)
+                arr.put(o)
+            }
+            arr.toString()
+        } catch (e: Exception) {
+            "[]"
         }
     }
 

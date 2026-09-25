@@ -659,6 +659,59 @@ body.night #mapOpenBtn.on { background: #e1251b; color: #fff; }
   cursor: pointer;
 }
 .pkgQuick b:active { opacity: .8; }
+/* 「从已装应用里挑」按钮（比快捷标签更醒目） */
+.pkgQuick b.pkbtn {
+  background: #e1251b;
+  color: #fff;
+  font-weight: 600;
+}
+/* 应用选择器：过滤框 + 可滚动的应用列表 */
+#appPicker { margin-top: 0.8vh; }
+#appPicker input {
+  width: 100%;
+  height: 4.1vh;
+  font-size: 1.9vh;
+  font-family: inherit;
+  border: 0.16vh solid #e2e4e9;
+  border-radius: 0.7vh;
+  background: #f7f8fa;
+  color: #35363a;
+  outline: none;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+  padding: 0 1vh;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pickList {
+  max-height: 26vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 0.16vh solid #e8eaee;
+  border-radius: 0.7vh;
+  margin-top: 0.6vh;
+  background: #fff;
+}
+.pickList .pi {
+  padding: 0.9vh 1.1vh;
+  border-bottom: 0.14vh solid #f0f1f4;
+  cursor: pointer;
+}
+.pickList .pi:last-child { border-bottom: 0; }
+.pickList .pi:active { background: #f2f4f7; }
+.pickList .pi .nm { font-size: 1.9vh; font-weight: 600; color: #2c2d31; }
+.pickList .pi .pk {
+  font-size: 1.5vh;
+  color: #9a9da4;
+  margin-top: 0.15vh;
+  word-break: break-all;
+}
+.pickList .pi.cur .nm::after {
+  content: '（当前）';
+  font-size: 1.5vh;
+  color: #e1251b;
+  font-weight: 500;
+}
 .seg {
   display: -webkit-box;
   display: -webkit-flex;
@@ -781,6 +834,12 @@ body.night #panel { background: #1b1e24; color: #e6e8ec; }
 body.night #panel h4.sub { border-top-color: #2a2e36; }
 body.night .prow { border-top-color: #2a2e36; }
 body.night .prow.col input { background: #23262d; border-color: #3a3e46; color: #e6e8ec; }
+body.night .pkgQuick b { background: #2a2e36; color: #c9ccd3; }
+body.night .pkgQuick b.pkbtn { background: #e1251b; color: #fff; }
+body.night .pickList { border-color: #3a3e46; background: #1b1e24; }
+body.night .pickList .pi { border-bottom-color: #2a2e36; }
+body.night .pickList .pi:active { background: #23262d; }
+body.night .pickList .pi .nm { color: #e6e8ec; }
 body.night .seg { background: #23262d; }
 body.night .seg b { color: #9aa0a8; }
 body.night .seg b.on { background: #333842; color: #ff6b5e; }
@@ -971,10 +1030,15 @@ body.night #scalebar { color: #2b2f36; }
       </div>
     </div>
     <div class="prow col">
-      <span>本机地图 App 包名（你装的魔改版）</span>
-      <input id="appPkg" type="text" placeholder="com.autonavi.amapautp" autocomplete="off" autocorrect="off" spellcheck="false">
+      <span>本机地图 App（点一下直接挑，或手动填包名）</span>
       <div class="pkgQuick" id="pkgQuick">
+        <b id="btnPick" class="pkbtn">从已装应用里挑</b>
         <b data-pkg="com.autonavi.amapautp">高德共存版</b><b data-pkg="com.autonavi.amapauto">高德车机版</b><b data-pkg="com.baidu.BaiduMap">百度地图</b><b data-pkg="com.tencent.map">腾讯地图</b>
+      </div>
+      <input id="appPkg" type="text" placeholder="com.autonavi.amapautp" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div id="appPicker" style="display:none;">
+        <input id="pickFilter" type="text" placeholder="输入名字或包名过滤，如：高德" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div id="pickList" class="pickList"></div>
       </div>
     </div>
     <div class="prow col">
@@ -1207,7 +1271,10 @@ body.night #scalebar { color: #2b2f36; }
     autoDetectMapPkg();          // 顺手探测一下车机上装了哪些地图，省得手打包名
     $('panelMask').className = 'show';
   }
-  function closePanel() { $('panelMask').className = ''; }
+  function closePanel() {
+    closePicker();
+    $('panelMask').className = '';
+  }
 
   /* 探测候选包名里哪个真装了（需要安卓桥的 hasApp；浏览器里直接跳过） */
   var PKG_CANDIDATES = [
@@ -1299,9 +1366,118 @@ body.night #scalebar { color: #2b2f36; }
     };
   }
 
-  /* 包名快捷填入（车机上敲包名很痛苦，点一下就行） */
+  /* ---------- 应用选择器：从车机已装的 App 里直接挑地图 ----------
+     CarBridge.listApps() 返回 [{"p":包名,"l":应用名},...]，
+     浏览器预览里没有桥，就提示装成 APK 后可用。 */
+  var appList = null;                       // 扫描结果缓存，不重复扫包
+  function canListApps() {
+    return hasBridge() && typeof window.CarBridge.listApps === 'function';
+  }
+  function parseApps(json) {
+    var out = [];
+    try {
+      var arr = JSON.parse(json);
+      for (var i = 0; i < arr.length; i++) {
+        var it = arr[i];
+        if (it && it.p) { out.push({ p: it.p, l: it.l || it.p }); }
+      }
+      out.sort(function (a, b) {
+        var x = a.l.toLowerCase(), y = b.l.toLowerCase();
+        return x < y ? -1 : (x > y ? 1 : 0);
+      });
+    } catch (e) {}
+    return out;
+  }
+  function syncSeg() {
+    var items = $('segSrc').getElementsByTagName('b');
+    for (var i = 0; i < items.length; i++) {
+      items[i].className = (items[i].getAttribute('data-v') === cfg.mapSrc) ? 'on' : '';
+    }
+  }
+  function renderAppList(kw) {
+    if (!appList) { return; }              // 列表还没加载好（防御：过滤框早触发也不炸）
+    var box = $('pickList');
+    var k = (kw || '').toLowerCase();
+    var html = '';
+    var n = 0;
+    for (var i = 0; i < appList.length; i++) {
+      var it = appList[i];
+      var nl = it.l.toLowerCase(), np = it.p.toLowerCase();
+      if (k && nl.indexOf(k) < 0 && np.indexOf(k) < 0) { continue; }
+      n++;
+      var cur = (it.p === cfg.mapPkg) ? ' cur' : '';
+      html += '<div class="pi' + cur + '" data-p="' + it.p + '" data-l="' + it.l.replace(/"/g, '&quot;') + '">'
+            + '<div class="nm">' + it.l + '</div>'
+            + '<div class="pk">' + it.p + '</div></div>';
+    }
+    if (!n) {
+      html = '<div class="pi"><div class="nm">没找到匹配的应用</div>'
+           + '<div class="pk">换个关键词试试，或直接手填包名</div></div>';
+    }
+    box.innerHTML = html;
+  }
+  function openPicker() {
+    $('appPicker').style.display = 'block';
+    if (appList) { renderAppList($('pickFilter').value); return; }
+    if (canListApps()) {
+      $('pickList').innerHTML = '<div class="pi"><div class="nm">正在读取应用列表…</div></div>';
+      // listApps 扫包有点慢，晚一拍再调，先让面板动画走完
+      setTimeout(function () {
+        try { appList = parseApps(window.CarBridge.listApps()); } catch (e) { appList = []; }
+        if (!appList.length) {
+          $('pickList').innerHTML = '<div class="pi"><div class="nm">读不到应用列表</div>'
+            + '<div class="pk">系统限制了包可见性，先用快捷标签或手填包名</div></div>';
+        } else {
+          renderAppList($('pickFilter').value);
+          toast('共 ' + appList.length + ' 个应用可选');
+        }
+      }, 120);
+    } else {
+      $('pickList').innerHTML = '<div class="pi"><div class="nm">浏览器预览里没有应用列表</div>'
+        + '<div class="pk">装成 APK 后，这里会列出车机上所有能打开的 App</div></div>';
+    }
+  }
+  function closePicker() {
+    $('appPicker').style.display = 'none';
+  }
+  function pickApp(pkg, label) {
+    cfg.mapPkg = pkg;
+    $('appPkg').value = pkg;
+    if (cfg.mapSrc !== 'app') {
+      cfg.mapSrc = 'app';            // 选了应用顺手把地图源切到本机地图
+      syncSeg();
+    }
+    saveCfg();
+    applyMapSource();
+    closePicker();
+    toast('地图应用：' + (label || pkg));
+  }
+  $('btnPick').onclick = function () {
+    if ($('appPicker').style.display === 'block') { closePicker(); }
+    else { openPicker(); }
+  };
+  $('pickFilter').oninput = function () { renderAppList(this.value); };
+  // 车机触摸点选：事件委托到列表容器，不怕列表重渲染丢绑定
+  // 注意 className 要做「包含」判断而不是全等 —— 当前行是 "pi cur"，全等会匹配失败
+  function hasCls(el, c) {
+    return (' ' + el.className + ' ').indexOf(' ' + c + ' ') >= 0;
+  }
+  $('pickList').onclick = function (e) {
+    var t = e.target;
+    while (t && t !== this && !hasCls(t, 'pi')) { t = t.parentNode; }
+    if (!t || t === this || !hasCls(t, 'pi')) { return; }
+    var p = t.getAttribute('data-p');
+    if (!p) { return; }              // 「没找到应用」那行没有 data-p
+    pickApp(p, t.getAttribute('data-l'));
+  };
+
+  /* 包名快捷填入（车机上敲包名很痛苦，点一下就行）
+     注意：必须跳过没有 data-pkg 的元素 —— 「从已装应用里挑」按钮也在
+     #pkgQuick 里，它的 onclick 在上面已经绑过了，这里再赋值会把它覆盖掉，
+     导致按钮点了没反应（v0.1.3 实测踩过的坑）。 */
   var quickItems = $('pkgQuick').getElementsByTagName('b');
   for (var qi = 0; qi < quickItems.length; qi++) {
+    if (!quickItems[qi].getAttribute('data-pkg')) { continue; }
     quickItems[qi].onclick = function () {
       var p = this.getAttribute('data-pkg');
       cfg.mapPkg = p;
