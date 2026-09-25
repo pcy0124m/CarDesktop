@@ -977,6 +977,16 @@ body.night #scalebar { color: #2b2f36; }
         <b data-pkg="com.autonavi.amapautp">高德共存版</b><b data-pkg="com.autonavi.amapauto">高德车机版</b><b data-pkg="com.baidu.BaiduMap">百度地图</b><b data-pkg="com.tencent.map">腾讯地图</b>
       </div>
     </div>
+    <div class="prow col">
+      <span>悬浮地图广播前缀（魔改版通用协议，一般不用改）</span>
+      <input id="mapAction" type="text" placeholder="com.autonavi.plus" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div class="pinfo" style="margin-top:0.6vh;">
+        选「本机地图」后，桌面会把右侧地图块的位置尺寸发给魔改高德，
+        它就把真地图悬浮到那里（跟氢桌面一个原理，不用 root）。<br>
+        前提：系统设置里给【高德】开「显示在其他应用上层」权限；
+        你的魔改包不带这个广播的话，地图不会出现，就退回「点地图打开全屏」的方式。
+      </div>
+    </div>
     <div class="prow"><span>转向指引卡</span><div class="sw on" id="swNav"><i></i></div></div>
     <div class="prow"><span>时间胶囊</span><div class="sw on" id="swClk"><i></i></div></div>
     <div class="prow"><span>比例尺</span><div class="sw on" id="swScale"><i></i></div></div>
@@ -1139,6 +1149,7 @@ body.night #scalebar { color: #2b2f36; }
     $('left').style.width = r + '%';
     $('pSplit').innerHTML = '左 ' + r + '% / 图 ' + (100 - r) + '%';
     setTimeout(drawMap, 320);          // 动画结束后按新宽度重画地图
+    syncMapWindow(450);                // 悬浮地图跟着挪到新的地图块位置
   }
   $('splitBtn').onclick = function () {
     splitIdx = (splitIdx + 1) % splitRatios.length;
@@ -1163,7 +1174,7 @@ body.night #scalebar { color: #2b2f36; }
   var CFG_KEY = 'cardesk_cfg';
   var cfg = {
     night: false, boot: true, rail: true, voice: true,
-    split: 34, mapSrc: 'demo', mapPkg: 'com.autonavi.amapautp',
+    split: 34, mapSrc: 'demo', mapPkg: 'com.autonavi.amapautp', mapAction: 'com.autonavi.plus',
     lNav: true, lClk: true, lScale: true, lTraffic: true
   };
   function prefGet(k) {
@@ -1192,6 +1203,7 @@ body.night #scalebar { color: #2b2f36; }
   /* =========================== 7. 设置面板 =========================== */
   function openPanel() {
     $('appPkg').value = cfg.mapPkg;
+    $('mapAction').value = cfg.mapAction;
     autoDetectMapPkg();          // 顺手探测一下车机上装了哪些地图，省得手打包名
     $('panelMask').className = 'show';
   }
@@ -1309,7 +1321,9 @@ body.night #scalebar { color: #2b2f36; }
   $('btnSave').onclick = function () {
     var p = normPkg($('appPkg').value);
     if (p) { cfg.mapPkg = p; }
+    cfg.mapAction = normPkg($('mapAction').value) || 'com.autonavi.plus';
     $('appPkg').value = cfg.mapPkg;
+    $('mapAction').value = cfg.mapAction;
     saveCfg();
     applyCfg();
     applyMapSource();
@@ -1422,16 +1436,50 @@ body.night #scalebar { color: #2b2f36; }
   }
 
   function applyMapSource() {
-    // mapSrc 只影响「地图区的标识」：demo = 纯示意背景，app = 明确指向本机地图 App
+    // mapSrc 只影响「地图区的标识」：demo = 纯示意背景，app = 悬浮本机地图
     var isApp = cfg.mapSrc === 'app';
     var btn = $('mapOpenBtn');
     btn.className = isApp ? 'on' : '';
-    btn.innerHTML = isApp ? '打开本机地图 · ' + (cfg.mapPkg || '')
+    btn.innerHTML = isApp ? '悬浮本机地图 · ' + (cfg.mapPkg || '')
                          : '点这里打开本机地图';
     $('mapwrap').className = 'tapable';
     mapMode = 'demo';
     resizeMap();
     drawMap();
+    if (isApp) { syncMapWindow(150); } else { hideMapWindow(); }
+  }
+
+  /* --- 悬浮地图：把右侧地图块的位置尺寸发给魔改高德 --------------------
+     氢桌面同款原理：魔改高德收到 <前缀>.showmap 广播（extra: x/y/w/h 像素）
+     后，用系统悬浮窗把「真地图」画到指定矩形上，能直接点能拖。
+     悬浮窗权限（显示在其他应用上层）授给【高德】，不用 root。
+     网页全屏沉浸，getBoundingClientRect() 出来的就是屏幕坐标。
+     你的魔改包不带这套广播时，地图不会出现 —— 退回点地图打开全屏。 */
+  var mapWinTimer = null;
+  function sendMapWindow(show) {
+    if (!hasBridge() || typeof window.CarBridge.mapWindow !== 'function') { return; }
+    var r = $('mapwrap').getBoundingClientRect();
+    try {
+      window.CarBridge.mapWindow(show,
+        Math.round(r.left), Math.round(r.top),
+        Math.round(r.width), Math.round(r.height),
+        normPkg(cfg.mapPkg), normPkg(cfg.mapAction) || 'com.autonavi.plus');
+    } catch (e) { }
+  }
+  /* 布局会变（分屏切换/旋转），拖个尾巴等稳定了再发，免得悬浮窗来回跳。
+     CSS 过渡约 320ms，450ms 时可能还差几个像素 —— 所以隔半秒再补发一次，
+     让悬浮窗最终精确对齐地图块。 */
+  function syncMapWindow(delay) {
+    if (cfg.mapSrc !== 'app') { return; }
+    if (mapWinTimer) { clearTimeout(mapWinTimer); }
+    mapWinTimer = setTimeout(function () {
+      sendMapWindow(true);
+      setTimeout(function () { sendMapWindow(true); }, 550);
+    }, delay || 120);
+  }
+  function hideMapWindow() {
+    if (mapWinTimer) { clearTimeout(mapWinTimer); mapWinTimer = null; }
+    sendMapWindow(false);
   }
 
   /* 地图区：点哪儿都能打开本机地图（不用先去设置里找开关） */
@@ -1623,6 +1671,7 @@ body.night #scalebar { color: #2b2f36; }
   function onResize() {
     resizeMap();
     drawMap();
+    syncMapWindow(300);
   }
   window.onresize = onResize;
   recenter();
@@ -1632,6 +1681,7 @@ body.night #scalebar { color: #2b2f36; }
     drawMap();
     loop();
     applyMapSource();
+    setTimeout(function () { syncMapWindow(0); }, 900);   // 布局全稳了再校一次坐标
   }, 60);
 
   /* -------------------- 首屏提示 -------------------- */

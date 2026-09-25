@@ -119,6 +119,40 @@ class CarBridge(private val act: Activity) {
         return true
     }
 
+    // ------------------------------------------------ 悬浮地图（魔改高德广播协议）
+    /**
+     * 让魔改版高德把自己的地图以悬浮小窗显示在桌面右侧地图块的位置。
+     *
+     * 原理（氢桌面同款思路，不需要 root）：
+     *   魔改版高德内部注册了广播接收器，收到
+     *     <前缀>.showmap  （extra: x / y / w / h，单位像素）
+     *   就以 TYPE_APPLICATION_OVERLAY 悬浮窗把自己的地图画到指定矩形；
+     *     <前缀>.closemap
+     *   则关掉。悬浮窗权限（显示在其他应用上层）授给【高德】，
+     *   我们只负责发广播和算坐标。
+     *
+     * 坐标由网页端用 getBoundingClientRect() 算好传过来（WebView 全屏沉浸，
+     * 网页坐标 = 屏幕坐标）；分屏比例/旋转变化时网页端会重新调一次。
+     * setPackage 定向广播，避免误触发其他 App 的同名接收器。
+     */
+    @JavascriptInterface
+    fun mapWindow(show: Boolean, x: Int, y: Int, w: Int, h: Int, pkg: String, actionPrefix: String) {
+        val p = pkg.trim()
+        val prefix = actionPrefix.trim().ifBlank { "com.autonavi.plus" }
+        val action = if (show) "$prefix.showmap" else "$prefix.closemap"
+        try {
+            val i = Intent(action)
+            if (p.isNotBlank()) i.setPackage(p)
+            if (show) {
+                i.putExtra("x", x).putExtra("y", y)
+                i.putExtra("w", w).putExtra("h", h)
+            }
+            act.sendBroadcast(i)
+        } catch (e: Exception) {
+            ui.post { Toast.makeText(act, "悬浮地图广播失败：${e.message}", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
     companion object {
         /** 与网页端 CFG_KEY 同名的存储空间，BootReceiver 也读这一份 */
         const val PREF = "cardesk"
