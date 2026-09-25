@@ -1071,6 +1071,7 @@ body.night #scalebar { color: #2b2f36; }
     <div class="prow"><span>开机自启</span><div class="sw on" id="swBoot"><i></i></div></div>
     <div class="prow"><span>左侧按钮条</span><div class="sw on" id="swRail"><i></i></div></div>
     <div class="prow"><span>转向播报</span><div class="sw on" id="swVoice"><i></i></div></div>
+    <div class="prow"><span>定位权限（车速/海拔/天气）</span><button id="btnLocPerm" type="button">去授权</button></div>
     <div class="prow"><span>音乐信息读取（通知使用权）</span><button id="btnMediaPerm" type="button">去授权</button></div>
 
     <h4 class="sub">地图</h4>
@@ -1198,11 +1199,19 @@ body.night #scalebar { color: #2b2f36; }
     $('spdHint').innerHTML = 'GPS 实时';
     setSpeed(kmh);
   };
+  var gpsState = '';
   window.onGpsStatus = function (s) {            // [BRIDGE] 定位链路状态
+    gpsState = s;
     if (cruising) return;
-    var m = { perm: '定位权限未授予（设置→应用→车机桌面→权限）',
-              off: '定位服务未开启', wait: '等待 GPS 信号…' };
+    var m = { perm: '定位权限未授予 · 点此去授权',
+              off: '定位服务未开启',
+              wait: '等待 GPS 信号…' };
     $('spdHint').innerHTML = m[s] || '点击数字演示巡航';
+    // 权限没给时把提示变成可点的授权入口（部分车机授权弹窗点不动，走系统应用详情页）
+    $('spdHint').style.color = s === 'perm' ? '#e1251b' : '';
+  };
+  $('spdHint').onclick = function () {
+    if (gpsState === 'perm') bridge('openAppSettings', '1', '待安卓侧接入');
   };
   var altReal = false;
   window.onAlt = function (m) { altReal = true; $('wAlt').innerHTML = m; };   // [BRIDGE] GPS 海拔 → 天气卡第 3 格
@@ -1372,6 +1381,7 @@ body.night #scalebar { color: #2b2f36; }
     $('appPkg').value = cfg.mapPkg;
     $('mapAction').value = cfg.mapAction;
     autoDetectMapPkg();          // 顺手探测一下车机上装了哪些地图，省得手打包名
+    syncLocPermBtn();            // 定位权限「已授权 ✓ / 去授权」
     syncMediaPermBtn();          // 「已授权 ✓ / 去授权」按钮文案跟实际状态走
     $('panelMask').className = 'show';
   }
@@ -1484,6 +1494,17 @@ body.night #scalebar { color: #2b2f36; }
     };
   }
   $('btnMapReset').onclick = function () { resetMapWindow(); };
+
+  /* 定位权限：跳系统应用详情页开「位置」权限（不走会卡死的授权弹窗） */
+  function syncLocPermBtn() {
+    if (!hasBridge()) return;
+    try {
+      $('btnLocPerm').innerHTML = window.CarBridge.locPerm() ? '已授权 ✓' : '去授权';
+    } catch (e) { }
+  }
+  $('btnLocPerm').onclick = function () {
+    bridge('openAppSettings', '1', '待安卓侧接入');
+  };
 
   /* 音乐信息读取授权：跳系统「通知使用权」页；打开面板时顺手刷新按钮文案 */
   function syncMediaPermBtn() {

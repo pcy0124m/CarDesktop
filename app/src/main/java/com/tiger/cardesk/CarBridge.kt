@@ -9,6 +9,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -412,6 +413,39 @@ class CarBridge(private val act: Activity) {
         "WSW", "W" -> "西"
         "WNW", "NW" -> "西北"
         else -> ""
+    }
+
+    // ------------------------------------------------ 定位权限（车速/海拔/天气的前提）
+    /** 网页端显示「已授权 ✓ / 去授权」用 */
+    @JavascriptInterface
+    fun locPerm(): Boolean = try {
+        Build.VERSION.SDK_INT < 23 ||
+            act.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * 跳到本 App 的系统「应用详情」页，用户在那里把「位置」权限设为允许。
+     * 为什么不走系统授权弹窗（requestPermissions）：
+     * 实测部分车机 ROM 的弹窗按钮点不动，弹出来就是个死窗，还会把桌面整个卡住；
+     * 应用详情页是标准设置界面，所有车机都能正常操作。授完权返回，
+     * MainActivity.onResume 会重新调 startFeeds，数据链自动接上。
+     */
+    @JavascriptInterface
+    fun openAppSettings() {
+        ui.post {
+            try {
+                val i = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", act.packageName, null)
+                )
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                act.startActivity(i)
+            } catch (e: Exception) {
+                Toast.makeText(act, "打不开应用设置：${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // ------------------------------------------------ 通知使用权（读音乐信息的前提）

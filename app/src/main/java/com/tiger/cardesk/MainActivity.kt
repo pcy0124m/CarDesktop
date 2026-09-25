@@ -83,28 +83,10 @@ class MainActivity : Activity() {
         setContentView(web)
         loadDesktop()
 
-        // 定位权限（读车速/海拔/天气的前提）：API 23+ 运行时申请，弹一次系统对话框；
-        // 授权结果见 onRequestPermissionsResult。21/22 安装即授予，不用弹。
-        if (Build.VERSION.SDK_INT >= 23 &&
-            checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                arrayOf(
-                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                    android.Manifest.permission.ACCESS_COARSE_LOCATION
-                ),
-                REQ_LOC
-            )
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_LOC) bridge.startFeeds(null)   // 授权了就立刻把数据链跑起来
+        // 定位权限不在开机时弹系统授权框：部分车机 ROM 的授权弹窗按钮点不动，
+        // 弹出来就是死窗，直接把桌面卡死。改由网页端引导用户去
+        // 「系统应用详情页」手动开（见 CarBridge.openAppSettings，那条路所有车机都通）。
+        // 从设置页授完权返回时 onResume 会重新调 startFeeds，数据链自动跑起来。
     }
 
     private fun loadDesktop() {
@@ -168,6 +150,5 @@ class MainActivity : Activity() {
     companion object {
         private const val ASSET_HTML = "index.html"
         private const val BASE_URL = "https://cardesk.local/"
-        private const val REQ_LOC = 1
     }
 }
