@@ -1,16 +1,36 @@
 package com.tiger.cardesk
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.KeyEvent
 import android.webkit.JavascriptInterface
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * 原生 → JS 的单向推送管道。
+ * MainActivity 在 WebView 就绪后挂上 sink，GPS / 天气 / 媒体会话等后台数据
+ * 都从这里切回 UI 线程 evaluateJavascript 推给网页（网页端定义 window.onXxx 接）。
+ */
+object JsPipe {
+    @Volatile var sink: ((String) -> Unit)? = null
+    fun send(js: String) { sink?.invoke(js) }
+}
 
 /**
  * 暴露给网页的桥接对象（网页里叫 window.CarBridge）。
@@ -30,6 +50,12 @@ class CarBridge(private val act: Activity) {
 
     private val prefs = act.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     private val ui = Handler(Looper.getMainLooper())
+
+    // 真实数据链（GPS / 天气）
+    private var gpsStarted = false
+    private var lastLat: Double? = null
+    private var lastLon: Double? = null
+    private var lastWeatherAt = 0L
 
     // ---------------------------------------------------------------- 配置存取
     @JavascriptInterface
@@ -226,6 +252,189 @@ class CarBridge(private val act: Activity) {
             act.sendBroadcast(i)
         } catch (e: Exception) {
             ui.post { Toast.makeText(act, "悬浮地图广播失败：${e.message}", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    // ------------------------------------------------ 真实数据：GPS 车速 / 海拔 / 天气
+    /**
+     * 让桌面卡里显示真数据（原装桌面同款体验）：
+     *   车速   —— GPS 的 location.speed（m/s ×3.6 = km/h），每秒一帧推给网页
+     *   海拔   —— location.altitude，天气卡第 3 格
+     *   天气   —— 定位坐标 → Open-Meteo 免费接口（失败换 wttr.in），每 30 分钟刷新
+     *
+     * 网页端开机会调 startFeeds("1")；定位权限是运行时权限，MainActivity 申请
+     * 通过后会再补调一次。没权限就给网页推 onGpsStatus('perm') 提示用户。
+     * 注意：速度只认 GPS_PROVIDER 的定位帧 —— 网络定位不带速度（恒为 0），
+     * 两路混着推会让车速在行驶中 0↔真值来回跳。
+     */
+    @JavascriptInterface
+    fun startFeeds(unused: String?) {
+        val ctx = act.applicationContext
+        val granted = Build.VERSION.SDK_INT < 23 ||
+            ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            JsPipe.send("window.onGpsStatus&&window.onGpsStatus('perm')")
+            return
+        }
+        if (!gpsStarted) {
+            gpsStarted = true
+            ui.post { startGps(ctx) }
+        }
+        // 立刻拉一次天气（有上次的坐标就直接用），之后由定位回调按 30 分钟节流刷新
+        val lat = lastLat
+        val lon = lastLon
+        if (lat != null && lon != null) fetchWeather(lat, lon)
+    }
+
+    /** MainActivity onDestroy 时调用，摘掉定位监听 */
+    fun stopFeeds() {
+        gpsStarted = false
+        try {
+            val lm = act.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            lm.removeUpdates(locListener)
+        } catch (e: Exception) { }
+    }
+
+    private fun startGps(ctx: Context) {
+        try {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val providers = ArrayList<String>()
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) providers.add(LocationManager.GPS_PROVIDER)
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) providers.add(LocationManager.NETWORK_PROVIDER)
+            if (providers.isEmpty()) {
+                JsPipe.send("window.onGpsStatus&&window.onGpsStatus('off')")
+                return
+            }
+            JsPipe.send("window.onGpsStatus&&window.onGpsStatus('wait')")
+            // 3 参数版本把回调派发到「调用线程的 Looper」——外面套了 ui.post，所以稳落主线程
+            for (p in providers) {
+                try { lm.requestLocationUpdates(p, if (p == LocationManager.GPS_PROVIDER) 1000L else 3000L, 0f, locListener) } catch (e: Exception) { }
+            }
+        } catch (e: Exception) {
+            JsPipe.send("window.onGpsStatus&&window.onGpsStatus('off')")
+        }
+    }
+
+    private val locListener = object : LocationListener {
+        override fun onLocationChanged(l: Location) {
+            lastLat = l.latitude
+            lastLon = l.longitude
+            if (l.provider == LocationManager.GPS_PROVIDER) {
+                val kmh = (l.speed * 3.6f).toInt()
+                JsPipe.send("window.onGpsSpeed&&window.onGpsSpeed(" + (if (kmh < 0) 0 else kmh) + ")")
+            }
+            JsPipe.send("window.onAlt&&window.onAlt(" + Math.round(l.altitude) + ")")
+            val now = System.currentTimeMillis()
+            if (now - lastWeatherAt > 30 * 60 * 1000L) {
+                lastWeatherAt = now
+                fetchWeather(l.latitude, l.longitude)
+            }
+        }
+    }
+
+    /**
+     * 拉天气：主用 Open-Meteo（免 key，支持经纬度直查，默认风速单位 km/h），
+     * 失败再试 wttr.in 的 JSON 格式。两个都挂在后台线程，结果经 JsPipe 推给网页：
+     *   window.onWeather({ok:1, t:温度℃, h:湿度%, d:风向中文, s:风速km/h})
+     */
+    private fun fetchWeather(lat: Double, lon: Double) {
+        Thread {
+            // ---- 主：Open-Meteo ----
+            try {
+                val u = URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
+                    "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m&timezone=auto")
+                val j = JSONObject(readAll(u.openConnection() as HttpURLConnection))
+                val c = j.getJSONObject("current")
+                pushWeather(
+                    Math.round(c.getDouble("temperature_2m")).toInt(),
+                    Math.round(c.getDouble("relative_humidity_2m")).toInt(),
+                    degToCn(c.getDouble("wind_direction_10m")),
+                    Math.round(c.getDouble("wind_speed_10m")).toInt()
+                )
+                return@Thread
+            } catch (e: Exception) { }
+            // ---- 备：wttr.in ----
+            try {
+                val u = URL("https://wttr.in/$lat,$lon?format=j1")
+                val j = JSONObject(readAll(u.openConnection() as HttpURLConnection))
+                val cc = j.getJSONArray("current_condition").getJSONObject(0)
+                pushWeather(
+                    cc.getString("temp_C").toIntOrNull() ?: 0,
+                    cc.getString("humidity").toIntOrNull() ?: 0,
+                    compass16ToCn(cc.optString("winddir16Point", "")),
+                    cc.getString("windspeedKmph").toIntOrNull() ?: 0
+                )
+            } catch (e: Exception) {
+                JsPipe.send("window.onWeather&&window.onWeather({\"ok\":0})")
+            }
+        }.start()
+    }
+
+    private fun pushWeather(t: Int, h: Int, d: String, s: Int) {
+        val o = JSONObject()
+        o.put("ok", 1); o.put("t", t); o.put("h", h); o.put("d", d); o.put("s", s)
+        JsPipe.send("window.onWeather&&window.onWeather($o)")
+    }
+
+    private fun readAll(conn: HttpURLConnection): String {
+        try {
+            conn.connectTimeout = 5000
+            conn.readTimeout = 6000
+            conn.setRequestProperty("User-Agent", "curl/7.88")
+            return conn.inputStream.bufferedReader().use { readText(it) }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun readText(r: BufferedReader): String {
+        val sb = StringBuilder()
+        var line: String? = r.readLine()
+        while (line != null) { sb.append(line); line = r.readLine() }
+        return sb.toString()
+    }
+
+    /** 度数 → 八方位中文（北=0°，顺时针每 45° 一档） */
+    private fun degToCn(deg: Double): String {
+        val dirs = arrayOf("北", "东北", "东", "东南", "南", "西南", "西", "西北")
+        val i = (((deg + 22.5) % 360 + 360) % 360 / 45.0).toInt() % 8
+        return dirs[i]
+    }
+
+    /** wttr.in 的 16 方位缩写（NW/NNW…）→ 中文 */
+    private fun compass16ToCn(p: String): String = when (p.uppercase()) {
+        "N", "NNW" -> if (p == "N") "北" else "西北"
+        "NNE", "NE" -> "东北"
+        "ENE", "E" -> "东"
+        "ESE", "SE" -> "东南"
+        "SSE", "S" -> "南"
+        "SSW", "SW" -> "西南"
+        "WSW", "W" -> "西"
+        "WNW", "NW" -> "西北"
+        else -> ""
+    }
+
+    // ------------------------------------------------ 通知使用权（读音乐信息的前提）
+    /** 网页设置面板显示授权状态用：本 App 是否已被授予「通知使用权」 */
+    @JavascriptInterface
+    fun mediaPerm(): Boolean = try {
+        val s = Settings.Secure.getString(act.contentResolver, "enabled_notification_listeners") ?: ""
+        s.contains(act.packageName)
+    } catch (e: Exception) {
+        false
+    }
+
+    /** 跳到系统的「通知使用权」设置页，让用户手动允许 */
+    @JavascriptInterface
+    fun openMediaPerm(unused: String?) {
+        ui.post {
+            try {
+                val i = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                act.startActivity(i)
+            } catch (e: Exception) {
+                Toast.makeText(act, "打不开通知使用权设置：${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

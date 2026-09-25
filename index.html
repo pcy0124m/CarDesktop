@@ -1071,6 +1071,7 @@ body.night #scalebar { color: #2b2f36; }
     <div class="prow"><span>开机自启</span><div class="sw on" id="swBoot"><i></i></div></div>
     <div class="prow"><span>左侧按钮条</span><div class="sw on" id="swRail"><i></i></div></div>
     <div class="prow"><span>转向播报</span><div class="sw on" id="swVoice"><i></i></div></div>
+    <div class="prow"><span>音乐信息读取（通知使用权）</span><button id="btnMediaPerm" type="button">去授权</button></div>
 
     <h4 class="sub">地图</h4>
     <div class="prow">
@@ -1190,12 +1191,21 @@ body.night #scalebar { color: #2b2f36; }
     $('spdNum').innerHTML = speed;
     $('mapSpdN').innerHTML = speed;
   }
-  window.onGpsSpeed = function (kmh) {           // [BRIDGE] 安卓侧调这个
+  window.onGpsSpeed = function (kmh) {           // [BRIDGE] 安卓侧调这个（GPS 车速，每秒一帧）
     cruising = false;
     if (speedTimer) { clearInterval(speedTimer); speedTimer = null; }
     $('navBtn').className = 'on';
+    $('spdHint').innerHTML = 'GPS 实时';
     setSpeed(kmh);
   };
+  window.onGpsStatus = function (s) {            // [BRIDGE] 定位链路状态
+    if (cruising) return;
+    var m = { perm: '定位权限未授予（设置→应用→车机桌面→权限）',
+              off: '定位服务未开启', wait: '等待 GPS 信号…' };
+    $('spdHint').innerHTML = m[s] || '点击数字演示巡航';
+  };
+  var altReal = false;
+  window.onAlt = function (m) { altReal = true; $('wAlt').innerHTML = m; };   // [BRIDGE] GPS 海拔 → 天气卡第 3 格
   $('spdNum').onclick = function () {
     if (cruising) {
       cruising = false;
@@ -1220,17 +1230,20 @@ body.night #scalebar { color: #2b2f36; }
   };
 
   /* =========================== 3. 天气 [WEATHER] ===========================
-     接真实数据：
-       fetch('https://devapi.qweather.com/v7/weather/now?location=101010100&key=KEY')
-         .then(r => r.json()).then(function(j){
-            $('wTemp').innerHTML = j.now.temp;
-            $('wHum').innerHTML  = j.now.humidity;
-            $('wDir').innerHTML  = j.now.windDir + j.now.windScale;
-         });
-     老内核没有 fetch，用 XMLHttpRequest；跨域请让安卓侧转发。
+     真实数据由安卓侧推送（[BRIDGE]）：定位坐标 → Open-Meteo 免费接口，
+     每 30 分钟刷新一次，推过来时调 window.onWeather({ok,t,h,d,s})。
+     拿到真数据前先跑演示值，来了就停掉抖动。
      ====================================================================== */
+  var weatherReal = false;
+  window.onWeather = function (j) {              // [BRIDGE] 安卓侧推送真实天气
+    if (!j || !j.ok) return;
+    weatherReal = true;
+    $('wTemp').innerHTML = j.t;
+    $('wHum').innerHTML = j.h;
+    $('wDir').innerHTML = j.d + j.s;
+  };
   function refreshWeather() {
-    // 演示：在基准值上下轻微抖动，证明界面是"活的"
+    if (weatherReal) return;                     // 有真数据后不再演示抖动
     var t = 32, h = 57, a = 33, d = '西北', s = 29;
     if (cruising) {
       t += Math.round(Math.random() * 2) - 1;
@@ -1239,13 +1252,42 @@ body.night #scalebar { color: #2b2f36; }
     }
     $('wTemp').innerHTML = t;
     $('wHum').innerHTML = h;
-    $('wAlt').innerHTML = a;
+    if (!altReal) $('wAlt').innerHTML = a;       // GPS 海拔来了就别覆盖
     $('wDir').innerHTML = d + s;
   }
   refreshWeather();
   setInterval(refreshWeather, 30000);
 
-  /* =========================== 4. 歌词轮播 =========================== */
+  /* =========================== 4. 音乐信息 + 歌词轮播 ===========================
+     [BRIDGE] 安卓侧（通知使用权 + MediaSession，原装桌面同款原理）推送：
+       window.onMedia({ok:1, t:'歌名', a:'歌手', app:'酷我音乐', p:true/false})
+       ok=0 没在播任何东西；ok=-1 没授权「通知使用权」。
+     桥接管了音乐卡就停掉演示歌词轮播 —— 别拿假歌词硬撑真歌名。
+     ============================================================================ */
+  var mediaLive = false;
+  window.onMedia = function (j) {
+    mediaLive = true;
+    if (j && j.ok === 1) {
+      var name = j.t + (j.a ? ' - ' + j.a : '');
+      $('mtitle').innerHTML = name;
+      $('conn').innerHTML = '<i class="dot"></i>' + (j.p ? '正在播放 · ' : '已暂停 · ') + (j.app || '媒体');
+      $('mmeta').innerHTML = '<span class="k">来源</span><span class="name">' + (j.app || '媒体') + '</span>';
+      $('lyric1').innerHTML = j.p ? '正在播放' : '已暂停';
+      $('lyric2').innerHTML = name;
+      $('lyric1').className = 'lyric';
+      $('lyric2').className = 'lyric cur';
+    } else if (j && j.ok === 0) {
+      $('mtitle').innerHTML = '未在播放';
+      $('conn').innerHTML = '<i class="dot"></i>未在播放';
+      $('mmeta').innerHTML = '<span class="k">状态</span><span class="name">待机</span>';
+      $('lyric1').innerHTML = '打开音乐 App 播放';
+      $('lyric2').innerHTML = '这里会显示歌曲信息';
+      $('lyric1').className = 'lyric';
+      $('lyric2').className = 'lyric cur';
+    } else {
+      $('conn').innerHTML = '<i class="dot"></i>未授权读取媒体';
+    }
+  };
   var lyrics = [
     '2002 年的第一场雪', '比以往时候来得更晚一些',
     '停靠在八楼的二路汽车', '带走了最后一片飘落的黄叶',
@@ -1254,6 +1296,7 @@ body.night #scalebar { color: #2b2f36; }
   ];
   var li = 0;
   setInterval(function () {
+    if (mediaLive) return;                       // 桥接管了音乐卡，演示轮播退位
     li = (li + 1) % lyrics.length;
     var nxt = (li + 1) % lyrics.length;
     var a = $('lyric1'), b = $('lyric2');
@@ -1329,6 +1372,7 @@ body.night #scalebar { color: #2b2f36; }
     $('appPkg').value = cfg.mapPkg;
     $('mapAction').value = cfg.mapAction;
     autoDetectMapPkg();          // 顺手探测一下车机上装了哪些地图，省得手打包名
+    syncMediaPermBtn();          // 「已授权 ✓ / 去授权」按钮文案跟实际状态走
     $('panelMask').className = 'show';
   }
   function closePanel() {
@@ -1440,6 +1484,17 @@ body.night #scalebar { color: #2b2f36; }
     };
   }
   $('btnMapReset').onclick = function () { resetMapWindow(); };
+
+  /* 音乐信息读取授权：跳系统「通知使用权」页；打开面板时顺手刷新按钮文案 */
+  function syncMediaPermBtn() {
+    if (!hasBridge()) return;
+    try {
+      $('btnMediaPerm').innerHTML = window.CarBridge.mediaPerm() ? '已授权 ✓' : '去授权';
+    } catch (e) { }
+  }
+  $('btnMediaPerm').onclick = function () {
+    bridge('openMediaPerm', '1', '待安卓侧接入');
+  };
 
   /* ---------- 应用选择器：从车机已装的 App 里直接挑地图 ----------
      CarBridge.listApps() 返回 [{"p":包名,"l":应用名},...]，
@@ -1661,7 +1716,7 @@ body.night #scalebar { color: #2b2f36; }
         var act = el.getAttribute('data-act');
         var label = act === 'prev' ? '上一首' : act === 'play' ? '播放 / 暂停'
                   : act === 'stop' ? '停止' : '下一首';
-        bridge('media', act, label + '：待接入酷我音乐');
+        bridge('media', act, label + '：待安卓侧接入');
       };
     })(cbtns[j]);
   }
@@ -1989,6 +2044,7 @@ body.night #scalebar { color: #2b2f36; }
   }, 60);
 
   /* -------------------- 首屏提示 -------------------- */
+  bridge('startFeeds', '1');          // [BRIDGE] 让安卓侧把 GPS 车速/海拔/天气链路跑起来
   setTimeout(function () { toast('车机桌面已就绪 · 点击左列数字可演示巡航'); }, 700);
 })();
 </script>

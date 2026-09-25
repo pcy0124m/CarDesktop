@@ -25,6 +25,7 @@ import android.widget.Toast
 class MainActivity : Activity() {
 
     private lateinit var web: WebView
+    private lateinit var bridge: CarBridge
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +60,18 @@ class MainActivity : Activity() {
         web.isLongClickable = false          // 车里别弹文字选择菜单
         web.isHapticFeedbackEnabled = false
         web.setOnLongClickListener { true }
-        web.addJavascriptInterface(CarBridge(this), "CarBridge")
+        bridge = CarBridge(this)
+        web.addJavascriptInterface(bridge, "CarBridge")
+
+        // 原生 → JS 推送管道：GPS/天气/媒体会话的数据都从这条道进网页。
+        // evaluateJavascript 必须在 UI 线程调，runOnUiThread 从任意线程过来都安全。
+        JsPipe.sink = { js ->
+            runOnUiThread {
+                if (::web.isInitialized) {
+                    try { web.evaluateJavascript(js, null) } catch (e: Exception) { }
+                }
+            }
+        }
 
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
@@ -70,6 +82,29 @@ class MainActivity : Activity() {
 
         setContentView(web)
         loadDesktop()
+
+        // 定位权限（读车速/海拔/天气的前提）：API 23+ 运行时申请，弹一次系统对话框；
+        // 授权结果见 onRequestPermissionsResult。21/22 安装即授予，不用弹。
+        if (Build.VERSION.SDK_INT >= 23 &&
+            checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                ),
+                REQ_LOC
+            )
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>?,
+        grantResults: IntArray?
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_LOC) bridge.startFeeds(null)   // 授权了就立刻把数据链跑起来
     }
 
     private fun loadDesktop() {
@@ -107,6 +142,8 @@ class MainActivity : Activity() {
         super.onResume()
         goFullscreen()
         web.onResume()
+        // 页面回来时补一把数据链（startFeeds 自带幂等保护，重复调不会叠加监听）
+        if (::bridge.isInitialized) bridge.startFeeds(null)
     }
 
     override fun onPause() {
@@ -122,6 +159,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (::bridge.isInitialized) bridge.stopFeeds()
+        JsPipe.sink = null
         web.destroy()
         super.onDestroy()
     }
@@ -129,5 +168,6 @@ class MainActivity : Activity() {
     companion object {
         private const val ASSET_HTML = "index.html"
         private const val BASE_URL = "https://cardesk.local/"
+        private const val REQ_LOC = 1
     }
 }
